@@ -45,6 +45,7 @@ export type ShopCanvasProps = {
   onMove?: (id: string, x: number, z: number) => void;
   onChange: (doc: ShopDocument, label?: string) => void;
   onInteraction?: (text: string | null) => void;
+  onNotice?: (text: string) => void;
 };
 
 const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(props, ref) {
@@ -85,6 +86,7 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
         onMove: (id, x, z) => latest.current.onMove?.(id, x, z),
         onChange: (doc, label) => latest.current.onChange(doc, label),
         onInteraction: (message) => latest.current.onInteraction?.(message),
+        onNotice: (message) => latest.current.onNotice?.(message),
         onError: message => { setError(message); setLoading(false); },
         onFrame: () => {
           if (!awaitingFrame.current) return;

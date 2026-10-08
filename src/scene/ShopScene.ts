@@ -5,7 +5,7 @@ import { canPlaceWallItem, getWallItems, getWallItemSize, getWallMountRuns, getW
 import { applyItemSize, applyWallItemSize, buildCity, buildItem, buildRoom, buildWallItem, disposeGroup, standingSignGroundY, standingSignSupports } from './objects';
 import { makeBuildHandles, minimumSize, positionBuildHandles, type BuildHandleId, type Dimensions } from './interactionHandles';
 import { FloorPainter, floorOutline, strokeCells, workCells } from './interactionFloor';
-import { intersectWall, intersectWallPlane, wallFrame, type WallHit } from './interactionWalls';
+import { intersectWall, intersectWallPlane, snapWallDragCandidate, wallFrame, type WallHit } from './interactionWalls';
 import { ObjectResizeTools, resizeFloorEdge, resizeFloorToTile, resizeWallEdge, resizeWallToTile, type ResizeEdge } from './interactionObjectResize';
 import { getItemSupport } from './itemSupport';
 import { getWallItemMount } from '../model';
@@ -57,6 +57,7 @@ export type SceneCallbacks = {
   onMove?: (id: string, x: number, z: number) => void;
   onChange: (doc: ShopDocument, label?: string) => void;
   onInteraction?: (text: string | null) => void;
+  onNotice?: (message: string) => void;
   onError: (message: string) => void;
   onFrame?: () => void;
 };
@@ -1191,7 +1192,7 @@ export class ShopScene {
     if (drag.kind === 'object-resize') { this.dragObjectResize(event, drag); return; }
     if (drag.kind === 'wall-item' && drag.wallItem) {
       const hit = this.wallCandidateAt(event, drag.wallItem, true);
-      drag.wallCandidate = hit ? { ...hit, offset: hit.offset + (drag.wallGrab?.offset ?? 0), height: hit.height + (drag.wallGrab?.height ?? 0) } : drag.wallCandidate;
+      drag.wallCandidate = hit ? snapWallDragCandidate(drag.base, { ...hit, offset: hit.offset + (drag.wallGrab?.offset ?? 0), height: hit.height + (drag.wallGrab?.height ?? 0) }, drag.wallItem.id) : drag.wallCandidate;
       drag.valid = !!hit && !!drag.wallCandidate && this.validWallCandidate(drag.base, drag.wallCandidate, drag.wallItem.id);
       const object = this.wallItems.children.find((entry) => entry.userData.wallItemId === drag.wallItem!.id);
       if (object && drag.wallCandidate) this.positionWallItem(object, drag.wallCandidate);
@@ -1368,6 +1369,8 @@ export class ShopScene {
         const { wall, line, offset, height, partitionId } = drag.wallCandidate;
         next = updateWallItem(drag.base, drag.wallItem.id, { wall, line, offset, height, partitionId });
         label = 'Hiasan dinding dipindahkan';
+      } else if (drag.moved) {
+        this.callbacks.onNotice?.('Belum muat di sini. Geser ke bagian tembok yang kosong atau kecilkan ukurannya.');
       }
     } else if (drag.kind === 'item' && drag.item) {
       this.callbacks.onSelect(drag.item.id);
