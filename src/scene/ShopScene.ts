@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { canPlace, getEntrance, getEntranceAnchor, getEntranceRotation, getFloorBounds, getFloorCells, getItemFootprint, getItemPlacementBounds, getWallHeight, hasFloorCell, isStandingSign, MAX_FLOOR_COORD, MIN_FLOOR_COORD, paintFloor, resizeShop, setEntrance, setWallHeight, updateItem, type ShopDocument, type ShopItem } from '../model';
+import { canPlace, getExterior, getEntrance, getEntranceAnchor, getEntranceRotation, getFloorBounds, getFloorCells, getItemFootprint, getItemPlacementBounds, getWallHeight, hasFloorCell, isStandingSign, MAX_FLOOR_COORD, MIN_FLOOR_COORD, paintFloor, resizeShop, setEntrance, setWallHeight, updateItem, type ShopDocument, type ShopItem } from '../model';
 import { canPlaceWallItem, getWallItems, getWallItemSize, getWallRuns, updateWallItem, wallItemPosition, type WallItem } from '../model';
 import { applyItemSize, applyWallItemSize, buildCity, buildItem, buildRoom, buildWallItem, disposeGroup, standingSignGroundY, standingSignSupports } from './objects';
 import { makeBuildHandles, minimumSize, positionBuildHandles, type BuildHandleId, type Dimensions } from './interactionHandles';
@@ -253,7 +253,7 @@ export class ShopScene {
     const { shop } = next;
     let lightingContentChanged = exteriorChanged;
     this.lighting.setMode(next.nightMode ?? false, firstShop || this.reducedMotion.matches);
-    const nextRoomKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, this.windowKey(getWallItems(shop)), getWallHeight(shop), getEntrance(shop).position, getEntranceRotation(shop), shop.floorColor, shop.wallColor, shop.name]);
+    const nextRoomKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, this.windowKey(getWallItems(shop)), getWallHeight(shop), getEntrance(shop).position, getEntranceRotation(shop), getExterior(shop).awning, shop.floorColor, shop.wallColor, shop.name]);
     if (nextRoomKey !== this.roomKey) {
       const previousDoorAngle = this.builtRoom?.doorPivot.rotation.y;
       if (this.room) disposeGroup(this.room);
@@ -316,10 +316,10 @@ export class ShopScene {
     }
     this.wallItems.visible = next.showWalls;
     this.wallItems.children.forEach((object) => { object.visible = object.userData.wallItemId !== next.wallPlacement?.id; });
-    const nextBuildingKey = JSON.stringify(buildingDoc);
+    const nextBuildingKey = JSON.stringify([buildingDoc, next.showCity]);
     if (next.exteriorOnly && this.buildingKey !== nextBuildingKey) {
       if (this.building) disposeGroup(this.building);
-      this.building = buildBuilding(buildingDoc);
+      this.building = buildBuilding(buildingDoc, { showCity: next.showCity ?? true });
       this.scene.add(this.building);
       this.buildingKey = nextBuildingKey;
       lightingContentChanged = true;
@@ -1536,6 +1536,22 @@ export class ShopScene {
     data.exteriorOnly = String(!!this.state.exteriorOnly);
     data.roofStyle = getRoof(this.state.building ?? this.state.shop).style;
     data.buildingHeight = String(this.buildingMetrics().height);
+    // Inspect the rendered objects in either view, so mode-switch checks can detect stale geometry.
+    const pose = (object: THREE.Object3D) => ({
+      position: object.getWorldPosition(new THREE.Vector3()).toArray(),
+      quaternion: object.getWorldQuaternion(new THREE.Quaternion()).toArray(),
+      scale: object.getWorldScale(new THREE.Vector3()).toArray(),
+    });
+    const entrance = this.state.exteriorOnly ? this.building?.getObjectByName('shop-entrance') : this.builtRoom?.entrance;
+    data.renderedEntrance = JSON.stringify(entrance?.visible && (this.state.exteriorOnly || (this.state.activeLevel ?? 0) === 0)
+      ? { ...pose(entrance), canopy: !!entrance.getObjectByName('entrance-canopy'), door: pose(entrance.getObjectByName('entrance-door-glass')!) } : null);
+    const windows: object[] = [];
+    (this.state.exteriorOnly ? this.building : this.wallItems)?.traverse(object => {
+      if (object.name.startsWith('window-style:')) {
+        windows.push({ id: object.userData.wallItemId, style: object.name.slice('window-style:'.length), ...pose(object) });
+      }
+    });
+    data.renderedWindows = JSON.stringify(windows);
     if (this.state.exteriorOnly) {
       for (const key of ['resizeHandles', 'resizeTiles', 'cellCenters', 'floorCells', 'floorOutline', 'paintCells', 'groundTargets', 'placementTargets', 'handles', 'itemCenters', 'wallItemCenters', 'wallTargets']) data[key] = '[]';
       data.doorSelected = 'false'; data.resizeMode = 'false'; delete data.doorCenter;

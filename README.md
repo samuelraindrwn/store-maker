@@ -21,7 +21,7 @@ Contoh baru memiliki **dua lantai**: toko, kamar mandi, dan tangga di lantai 1; 
 
 - **Jumlah lantai** memilih 1 sampai **4 lantai**. Tombol **LT 1–4** memilih lantai yang sedang ditata. Interior menampilkan satu lantai terbuka agar barang mudah dipilih; bentuk lantai, dinding, perabot, dan aksesori masing-masing lantai dapat diubah sendiri.
 - Lantai baru mengikuti bentuk lantai sebelumnya. Tangga ditambahkan di lantai penghubung jika ada ruang; tangga tambahan dapat dipasang dari **Gudang & utilitas**. Katalog ini juga memuat rak gudang berisi kardus dan modul kamar mandi dengan toilet, wastafel, serta pancuran.
-- **Eksterior** memperlihatkan seluruh bangunan dari luar. Atur warna fasad dan bingkai, kanopi masuk, serta **Genteng** atau **Rooftop**. Atap genteng memiliki bidang miring dan barisan genteng; rooftop memiliki pagar pembatas dan pilihan taman dengan pergola.
+- **Eksterior** memperlihatkan seluruh bangunan dari luar dengan pintu dan jendela yang sama seperti desain Interior. Posisi, arah, bentuk, ukuran, warna, dan keadaan pintu tetap sama; jendela hanya muncul di tempat yang dipasang. Atur warna fasad dan lis, kanopi masuk, serta **Genteng** atau **Rooftop**. Atap genteng memiliki bidang miring dan barisan genteng; rooftop memiliki pagar pembatas dan pilihan taman dengan pergola.
 - **Lihat tokoku** menyembunyikan panel. Dalam mode Eksterior, foto yang diunduh menampilkan seluruh bangunan dan atap. Pilihan siang/malam tetap tersedia.
 - Mengurangi jumlah lantai menghapus lantai paling atas berikut isinya dalam satu langkah; **Urungkan** memulihkannya. Semua lantai, fasad, dan atap ikut autosave, undo/redo, ekspor, serta impor, termasuk ketika file disimpan saat sedang menata lantai atas.
 

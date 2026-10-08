@@ -99,7 +99,7 @@ test('exterior facade and both roof styles persist with four-storey camera and v
   await expect(canvas(page)).toHaveAttribute('data-exterior-only', 'true');
   await photo(page, info, 'exterior-tiles-two');
   await button(page, 'Warna fasad 2').click();
-  await button(page, 'Warna bingkai 3').click();
+  await button(page, 'Warna lis fasad 3').click();
   await page.getByLabel('Kanopi toko', { exact: true }).uncheck();
   await button(page, 'Rooftop').click();
   await page.getByLabel('Taman rooftop', { exact: true }).check();

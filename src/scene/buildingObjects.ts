@@ -1,6 +1,8 @@
 import * as THREE from 'three';
-import { getEntranceAnchor, getEntranceRotation, getExterior, getFloorBounds, getFloorCells, getItemFootprint, getLevelCount, getLevelDocument, getRoof, getWallHeight, isStandingSign, type ShopDocument } from '../model';
-import { box, buildItem, textTexture } from './objects';
+import { getEntranceAnchor, getEntranceRotation, getExterior, getFloorBounds, getFloorCells, getItemFootprint, getLevelCount, getLevelDocument, getRoof, getWallHeight, getWallItems, wallItemPosition, type ShopDocument } from '../model';
+import { applyWallItemSize, box, buildItem, buildRoom, buildWallItem, disposeGroup } from './objects';
+import { wallPanels } from './wallGeometry';
+import { getItemSupport } from './itemSupport';
 
 export const LEVEL_SLAB = 0.24;
 type Edge = { side: 'north' | 'south' | 'east' | 'west'; line: number; start: number; end: number };
@@ -61,51 +63,6 @@ function edgeFrame(shop: ShopDocument, edge: Edge) {
   group.position.set((horizontal ? (edge.start + edge.end) / 2 : edge.line) - shop.width / 2, 0, (horizontal ? edge.line : (edge.start + edge.end) / 2) - shop.depth / 2);
   group.rotation.y = { south: 0, north: Math.PI, east: Math.PI / 2, west: -Math.PI / 2 }[edge.side];
   return group;
-}
-
-function window(parent: THREE.Group, x: number, y: number, width: number, height: number, trim: string, shopWindow: boolean) {
-  const frame = new THREE.Group(); frame.name = shopWindow ? 'storefront-window' : 'upper-floor-window'; frame.position.set(x, y, 0.12); parent.add(frame);
-  const pane = box(frame, width, height, 0.035, '#7dabae', 0, 0, 0, 0.01);
-  pane.name = 'exterior-glass'; pane.material.roughness = 0.23; pane.material.metalness = 0.16;
-  pane.material.userData.nightGlow = { color: '#f5d997', dayIntensity: 0, nightIntensity: 0.58 };
-  for (const sx of [-1, 1]) box(frame, 0.075, height + 0.10, 0.09, trim, sx * (width / 2 + 0.025), 0, 0.035);
-  for (const sy of [-1, 1]) box(frame, width + 0.15, 0.075, 0.10, trim, 0, sy * (height / 2 + 0.025), 0.035);
-  box(frame, 0.05, height, 0.08, '#f0e6ce', 0, 0, 0.025);
-  box(frame, width, 0.05, 0.08, '#f0e6ce', 0, shopWindow ? height * 0.23 : 0, 0.025);
-  box(frame, width + 0.24, 0.075, 0.26, '#eadbc0', 0, -height / 2 - 0.05, 0.055);
-  const reflection = box(frame, width * 0.16, height * 0.76, 0.007, '#c5ddd4', -width * 0.29, 0, 0.023, 0);
-  reflection.material.transparent = true; reflection.material.opacity = 0.4;
-}
-
-function addEntrance(parent: THREE.Group, shop: ShopDocument, trim: string, awning: boolean) {
-  const anchor = getEntranceAnchor(shop), group = new THREE.Group();
-  group.name = 'exterior-entrance'; group.position.set(anchor.x, 0, anchor.z + 0.06);
-  group.rotation.y = -THREE.MathUtils.degToRad(getEntranceRotation(shop));
-  const w = Math.min(1.65, anchor.width - 0.12);
-  box(group, w + 0.2, 2.24, 0.16, trim, 0, 1.12, 0);
-  window(group, 0, 1.28, Math.max(0.5, w - 0.15), 1.55, trim, true);
-  box(group, w - 0.13, 0.42, 0.07, trim, 0, 0.29, 0.11);
-  box(group, 0.045, 0.3, 0.12, '#dac68e', w * 0.32, 1.02, 0.25);
-  box(group, w + 0.28, 0.11, 0.75, '#e2cdb0', 0, -0.015, 0.23);
-  box(group, w * 0.80, 0.02, 0.38, '#ad9780', 0, 0.053, 0.36);
-  const signW = Math.min(2.3, anchor.width + 0.46);
-  box(group, signW, 0.32, 0.1, trim, 0, 2.48, 0.08);
-  const texture = textTexture(shop.name, trim, '#fff1d7', signW / 0.27);
-  if (texture) {
-    const label = new THREE.Mesh(new THREE.PlaneGeometry(signW - 0.1, 0.26), new THREE.MeshStandardMaterial({ map: texture, roughness: 0.8 }));
-    label.position.set(0, 2.48, 0.136); label.name = 'exterior-shop-name'; group.add(label);
-  }
-  if (awning) {
-    const canopy = new THREE.Group(); canopy.name = 'exterior-awning'; canopy.position.set(0, 2.7, 0.36); canopy.rotation.x = 0.16;
-    const stripeW = (signW + 0.2) / 12;
-    for (let stripe = 0; stripe < 12; stripe++) {
-      const x = -(signW + 0.2) / 2 + stripeW * (stripe + 0.5), tone = stripe % 2 ? '#f8eddb' : trim;
-      box(canopy, stripeW + 0.002, 0.055, 0.9, tone, x, 0, 0, 0.007);
-      box(canopy, stripeW + 0.002, 0.15, 0.05, tone, x, -0.07, 0.45, 0.012);
-    }
-    group.add(canopy);
-  }
-  parent.add(group);
 }
 
 function planter(parent: THREE.Group, x: number, z: number) {
@@ -181,34 +138,69 @@ function buildRoof(building: ShopDocument, shop: ShopDocument, base: number) {
   return group;
 }
 
-/** The exterior is a separate closed shell; the editable floor keeps its stable y=0 coordinates. */
-export function buildBuilding(building: ShopDocument) {
+/** Close the two cutaway sides around the saved doorway; do not invent facade openings. */
+function closeCutawayWalls(parent: THREE.Group, shop: ShopDocument, groundFloor: boolean, color: string, trim: string) {
+  const anchor = getEntranceAnchor(shop), height = getWallHeight(shop);
+  for (const edge of buildingEdges(shop).filter(edge => edge.side === 'south' || edge.side === 'east')) {
+    const wall = edgeFrame(shop, edge), length = edge.end - edge.start;
+    wall.name = `exterior-wall:${edge.side}`; parent.add(wall);
+    const holes = [];
+    if (groundFloor && edge.side === 'south' && Math.abs(wall.position.z + 0.09 - anchor.z) < 0.001
+      && anchor.x >= wall.position.x - length / 2 && anchor.x <= wall.position.x + length / 2) {
+      const angle = THREE.MathUtils.degToRad(getEntranceRotation(shop));
+      const scale = Math.min(1, anchor.width / 1.84);
+      const halfWidth = (1.52 * scale * Math.abs(Math.cos(angle)) + 0.24 * Math.abs(Math.sin(angle))) / 2;
+      const center = anchor.x - wall.position.x;
+      holes.push({ start: center - halfWidth, end: center + halfWidth, bottom: 0, top: 2.19 });
+      wall.userData.entranceOpening = { x: anchor.x, z: anchor.z, width: halfWidth * 2 };
+    }
+    for (const panel of wallPanels(-length / 2 - 0.05, length / 2 + 0.05, height, holes)) {
+      const mesh = box(wall, panel.end - panel.start, panel.top - panel.bottom, 0.16, color,
+        (panel.start + panel.end) / 2, (panel.bottom + panel.top) / 2, 0.07, 0);
+      mesh.name = 'exterior-wall-panel';
+    }
+    box(wall, length + 0.12, 0.1, 0.23, trim, 0, height + 0.04, 0.07, 0.02).name = 'exterior-floor-band';
+    for (const panel of wallPanels(-length / 2, length / 2, 0.12, holes)) {
+      box(wall, panel.end - panel.start, panel.top - panel.bottom, 0.08, '#c6b3a2',
+        (panel.start + panel.end) / 2, (panel.bottom + panel.top) / 2, 0.17, 0.012).name = 'exterior-plinth';
+    }
+  }
+}
+
+/** A closed view of the authored rooms, sharing their floor, entrance, windows and contents. */
+export function buildBuilding(building: ShopDocument, options: { showCity?: boolean } = {}) {
   const group = new THREE.Group(); group.name = 'shop-building-exterior';
   const facade = getExterior(building), count = getLevelCount(building); let base = 0;
   for (let level = 0; level < count; level++) {
     const shop = getLevelDocument(building, level), height = getWallHeight(shop), floor = new THREE.Group();
     floor.name = `exterior-level:${level + 1}`; floor.position.y = base; floor.userData.level = level; floor.userData.floorY = base; group.add(floor);
-    tileSlab(floor, shop, facade.trimColor, -LEVEL_SLAB / 2, LEVEL_SLAB, 'building-level-slab');
-    const anchor = getEntranceAnchor(shop);
-    for (const edge of buildingEdges(shop)) {
-      const wall = edgeFrame(shop, edge), length = edge.end - edge.start; wall.name = `exterior-wall:${edge.side}`; floor.add(wall);
-      box(wall, length + 0.09, height, 0.17, facade.wallColor, 0, height / 2, 0, 0).name = 'exterior-wall-panel';
-      box(wall, length + 0.17, 0.14, 0.25, facade.trimColor, 0, height - 0.03, 0, 0.01).name = 'exterior-floor-band';
-      box(wall, length + 0.1, 0.20, 0.20, '#d0bca4', 0, 0.1, 0).name = 'exterior-plinth';
-      const bayCount = Math.floor(length / 1.75), bayWidth = length / Math.max(1, bayCount);
-      for (let bay = 0; bay < bayCount; bay++) {
-        const x = -length / 2 + (bay + 0.5) * bayWidth;
-        const atDoor = level === 0 && edge.side === 'south' && Math.abs(wall.position.z + 0.09 - anchor.z) < 0.02 && Math.abs(wall.position.x + x - anchor.x) < 1.1 + bayWidth / 2;
-        if (atDoor) continue;
-        window(wall, x, level === 0 ? 1.3 : height * 0.55, Math.min(level === 0 ? 1.3 : 1.04, bayWidth - 0.5), level === 0 ? 1.6 : Math.min(1.35, height - 0.9), facade.trimColor, level === 0);
+    // Reuse the actual room instead of generating a second, unrelated shop facade.
+    const room = buildRoom({ ...shop, wallColor: facade.wallColor, exterior: facade }, level > 0 ? { slabDepth: LEVEL_SLAB } : {});
+    room.group.name = 'exterior-room'; floor.add(room.group);
+    room.walls.traverse(object => {
+      if (object.userData.wallCoping && object instanceof THREE.Mesh && object.material instanceof THREE.MeshStandardMaterial) {
+        object.material.color.set(facade.trimColor);
       }
-      for (const x of [-length / 2 + 0.10, length / 2 - 0.10]) box(wall, 0.11, height - 0.2, 0.07, '#f3e7d2', x, height / 2, 0.10);
+    });
+    if (level > 0) disposeGroup(room.entrance);
+    if (room.hasFloor) closeCutawayWalls(floor, shop, level === 0, facade.wallColor, facade.trimColor);
+    for (const item of getWallItems(shop)) {
+      const object = buildWallItem(item, shop), point = wallItemPosition(shop, item);
+      applyWallItemSize(object, item);
+      object.position.set(point.x, point.y, point.z); object.rotation.y = point.rotation;
+      object.userData.wallItemId = item.id;
+      object.userData.wallItemKind = item.kind;
+      floor.add(object);
     }
-    if (level === 0 && getFloorCells(shop).length) {
-      addEntrance(floor, building, facade.trimColor, facade.awning);
-      for (const item of shop.items.filter(item => isStandingSign(item.kind))) {
-        const object = buildItem(item), footprint = getItemFootprint(item);
-        object.position.set(item.x - shop.width / 2 + footprint.width / 2, 0.038, item.z - shop.depth / 2 + footprint.depth / 2); object.rotation.y = -THREE.MathUtils.degToRad(item.rotation); floor.add(object);
+    // Saved furniture remains visible through real glass/open doors at its actual position.
+    for (const item of shop.items) {
+      const object = buildItem(item, height + LEVEL_SLAB), footprint = getItemFootprint(item);
+      const support = level === 0 ? getItemSupport(shop, item, room.floor, room.entrance, options.showCity ?? true) : { baseY: 0.038 };
+      object.position.set(item.x - shop.width / 2 + footprint.width / 2, support.baseY, item.z - shop.depth / 2 + footprint.depth / 2);
+      object.rotation.y = -THREE.MathUtils.degToRad(item.rotation); floor.add(object);
+      if (support.foundation) {
+        const f = support.foundation;
+        box(floor, f.width, f.top - f.bottom, f.depth, '#d3c4ba', f.x, (f.top + f.bottom) / 2, f.z, 0).name = 'standing-sign-foundation';
       }
     }
     base += height + LEVEL_SLAB;

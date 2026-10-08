@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { CATALOG, getEntrance, getEntranceAnchor, getEntranceRotation, getFloorCells, getItemSize, getWallHeight, getWallItems, getWallItemSize, getWallRuns, WALL_CATALOG } from '../model';
+import { CATALOG, getEntrance, getEntranceAnchor, getEntranceRotation, getExterior, getFloorCells, getItemSize, getWallHeight, getWallItems, getWallItemSize, getWallRuns, WALL_CATALOG } from '../model';
 import type { ProductKind, ShopDocument, ShopItem, WallItem } from '../model';
 import { wallPanels } from './wallGeometry';
 import { buildWindowGeometry, buildWindowSpandrels } from './windowGeometry';
@@ -505,12 +505,12 @@ function contourRuns(shop: ShopDocument, side: 'north' | 'west' | 'south' | 'eas
 }
 
 /** Only occupied cells have a slab: concave outlines and holes stay visibly open. */
-function buildContourFloor(shop: ShopDocument, floor: THREE.Group) {
+function buildContourFloor(shop: ShopDocument, floor: THREE.Group, slabDepth = 0.39) {
   const cells = getFloorCells(shop);
   const matrix = new THREE.Matrix4();
   const tileColor = new THREE.Color(shop.floorColor);
   const layers = [
-    { name: 'floor-cell-slabs', geometry: new THREE.BoxGeometry(1, 0.3, 1), color: '#d3c4ba', y: -0.24 },
+    { name: 'floor-cell-slabs', geometry: new THREE.BoxGeometry(1, slabDepth - 0.09, 1), color: '#d3c4ba', y: -(slabDepth + 0.09) / 2 },
     { name: 'floor-cell-edges', geometry: new THREE.BoxGeometry(1, 0.09, 1), color: '#fff4dc', y: -0.055 },
     { name: 'floor-cell-tiles', geometry: new RoundedBoxGeometry(0.985, 0.055, 0.985, 1, 0.006), color: '#ffffff', y: -0.003 },
   ];
@@ -602,56 +602,21 @@ export function standingSignGroundY(floor: THREE.Object3D, entrance: THREE.Objec
   return Math.max(ground, hit?.point.y ?? ground);
 }
 
-export function buildRoom(shop: ShopDocument) {
-  const group = new THREE.Group();
-  group.name = 'shop-room';
-  const walls = new THREE.Group();
-  const floor = new THREE.Group();
-  const backWall = new THREE.Group();
-  const leftWall = new THREE.Group();
-  const entrance = new THREE.Group();
-  floor.name = 'room-floor';
-  backWall.name = 'room-back-wall';
-  leftWall.name = 'room-left-wall';
-  entrance.name = 'shop-entrance';
-  group.add(floor, walls);
-  walls.add(backWall, leftWall, entrance);
-  const w = shop.width;
-  const d = shop.depth;
-  const h = getWallHeight(shop);
-  const customFloor = shop.floorCells !== undefined;
-
-  if (getFloorCells(shop).length === 0) {
-    // Keep stable renderer references without allocating a floor or doorway.
-    // The inert hit mesh owns no vertices and is never a picking target.
-    const doorPivot = new THREE.Group();
-    const doorHit = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
-    doorHit.raycast = () => undefined;
-    doorHit.visible = false;
-    doorPivot.add(doorHit);
-    entrance.add(doorPivot);
-    entrance.visible = false;
-    const previewDimensions = (_width: number, _depth: number, _height: number, _entrancePosition?: number) => undefined;
-    const previewWallItems = (_items: WallItem[]) => undefined;
-    return { group, walls, floor, backWall, leftWall, entrance, doorPivot, doorHit, previewDimensions, previewWallItems, hasFloor: false };
-  }
-
-  if (customFloor) {
-    buildContourFloor(shop, floor);
-  } else {
-  box(floor, w + 0.72, 0.3, d + 1.1, '#d3c4ba', 0, -0.24, 0.16, 0.14);
-  box(floor, w + 0.48, 0.09, d + 0.5, '#fff4dc', 0, -0.055, 0, 0.055);
-  const floorColor = new THREE.Color(shop.floorColor);
-  for (let x = 0; x < w; x++) for (let z = 0; z < d; z++) {
-    const color = floorColor.clone().multiplyScalar((x + z) % 2 ? 0.97 : 1.03);
-    box(floor, 0.985, 0.055, 0.985, `#${color.getHexString()}`, x - w / 2 + 0.5, -0.003, z - d / 2 + 0.5, 0.006);
-  }
-  }
-  buildStructuralWalls(shop, backWall, leftWall, h);
-
-  // Rotate the whole entrance together: frame, leaf, canopy, landing and mat.
+/** Keep interior and exterior entrances anchored to the same saved doorway. */
+export function applyEntranceTransform(shop: ShopDocument, entrance: THREE.Object3D) {
+  const anchor = getEntranceAnchor(shop);
+  entrance.position.set(anchor.x, 0, anchor.z);
   entrance.rotation.y = -THREE.MathUtils.degToRad(getEntranceRotation(shop));
-  // A framed door is the only front facade; the remaining edge stays a cutaway.
+  entrance.scale.x = Math.min(1, anchor.width / 1.84);
+  entrance.userData.centerX = anchor.x;
+  entrance.userData.centerRange = [getEntranceAnchor({ ...shop, entrance: { ...getEntrance(shop), position: 0 } }).x, getEntranceAnchor({ ...shop, entrance: { ...getEntrance(shop), position: 1 } }).x];
+}
+
+/** One authored doorway, including its leaf, sign, landing, mat, and optional canopy. */
+export function buildEntrance(shop: ShopDocument) {
+  const entrance = new THREE.Group();
+  entrance.name = 'shop-entrance';
+  // Reuse the framed doorway in both the cutaway interior and the closed exterior.
   for (const x of [-0.84, 0.84]) box(entrance, 0.16, 2.3, 0.2, '#a88368', x, 1.15, 0, 0.02);
   box(entrance, 1.84, 0.15, 0.23, '#a88368', 0, 2.265, 0);
   box(entrance, 1.7, 0.085, 0.35, '#d8c2a1', 0, 0.035, 0.035);
@@ -704,17 +669,76 @@ export function buildRoom(shop: ShopDocument) {
     sign.position.set(0, 2.47, 0.085);
     entrance.add(sign);
   }
-  const canopy = new THREE.Group();
-  canopy.position.set(0, 2.7, 0.35);
-  canopy.rotation.x = 0.17;
-  for (let i = 0; i < 12; i++) {
-    const color = i % 2 ? '#f8ebd3' : '#a18aaa';
-    box(canopy, 0.197, 0.055, 1.08, color, -1.0835 + i * 0.197, 0, 0, 0.008);
-    box(canopy, 0.197, 0.19, 0.055, color, -1.0835 + i * 0.197, -0.1, 0.54, 0.035);
+  if (getExterior(shop).awning) {
+    const canopy = new THREE.Group();
+    canopy.name = 'entrance-canopy';
+    canopy.position.set(0, 2.7, 0.35);
+    canopy.rotation.x = 0.17;
+    for (let i = 0; i < 12; i++) {
+      const color = i % 2 ? '#f8ebd3' : '#a18aaa';
+      box(canopy, 0.197, 0.055, 1.08, color, -1.0835 + i * 0.197, 0, 0, 0.008);
+      box(canopy, 0.197, 0.19, 0.055, color, -1.0835 + i * 0.197, -0.1, 0.54, 0.035);
+    }
+    entrance.add(canopy);
   }
-  entrance.add(canopy);
 
   entrance.traverse(object => { object.userData.door = true; object.userData.interaction = 'door'; });
+  applyEntranceTransform(shop, entrance);
+  return { entrance, doorPivot, doorHit };
+}
+
+export function buildRoom(shop: ShopDocument, options: { slabDepth?: number } = {}) {
+  const group = new THREE.Group();
+  group.name = 'shop-room';
+  const walls = new THREE.Group();
+  const floor = new THREE.Group();
+  const backWall = new THREE.Group();
+  const leftWall = new THREE.Group();
+  floor.name = 'room-floor';
+  backWall.name = 'room-back-wall';
+  leftWall.name = 'room-left-wall';
+  group.add(floor, walls);
+  walls.add(backWall, leftWall);
+  const w = shop.width;
+  const d = shop.depth;
+  const h = getWallHeight(shop);
+  const customFloor = shop.floorCells !== undefined;
+
+  if (getFloorCells(shop).length === 0) {
+    const entrance = new THREE.Group();
+    entrance.name = 'shop-entrance';
+    walls.add(entrance);
+    // Keep stable renderer references without allocating a floor or doorway.
+    // The inert hit mesh owns no vertices and is never a picking target.
+    const doorPivot = new THREE.Group();
+    const doorHit = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
+    doorHit.raycast = () => undefined;
+    doorHit.visible = false;
+    doorPivot.add(doorHit);
+    entrance.add(doorPivot);
+    entrance.visible = false;
+    const previewDimensions = (_width: number, _depth: number, _height: number, _entrancePosition?: number) => undefined;
+    const previewWallItems = (_items: WallItem[]) => undefined;
+    return { group, walls, floor, backWall, leftWall, entrance, doorPivot, doorHit, previewDimensions, previewWallItems, hasFloor: false };
+  }
+
+  if (customFloor || options.slabDepth !== undefined) {
+    // Stacked floors use their exact footprint and a shallower support slab;
+    // the broad ground-level foundation would cover the lower entrance canopy.
+    buildContourFloor(shop, floor, options.slabDepth);
+  } else {
+  box(floor, w + 0.72, 0.3, d + 1.1, '#d3c4ba', 0, -0.24, 0.16, 0.14);
+  box(floor, w + 0.48, 0.09, d + 0.5, '#fff4dc', 0, -0.055, 0, 0.055);
+  const floorColor = new THREE.Color(shop.floorColor);
+  for (let x = 0; x < w; x++) for (let z = 0; z < d; z++) {
+    const color = floorColor.clone().multiplyScalar((x + z) % 2 ? 0.97 : 1.03);
+    box(floor, 0.985, 0.055, 0.985, `#${color.getHexString()}`, x - w / 2 + 0.5, -0.003, z - d / 2 + 0.5, 0.006);
+  }
+  }
+  buildStructuralWalls(shop, backWall, leftWall, h);
+
+  const { entrance, doorPivot, doorHit } = buildEntrance(shop);
+  walls.add(entrance);
   floor.userData.interaction = 'floor';
 
   let previewHeight = h;
@@ -751,11 +775,7 @@ export function buildRoom(shop: ShopDocument) {
     leftWall.position.set(customFloor ? 0 : (w - width) / 2, 0, 0);
     previewWallHeight(height);
     const previewShop = { ...shop, width: customFloor ? w : width, depth: customFloor ? d : depth, entrance: { ...getEntrance(shop), position: entrancePosition } };
-    const anchor = getEntranceAnchor(previewShop);
-    entrance.position.set(anchor.x, 0, anchor.z);
-    entrance.scale.x = Math.min(1, anchor.width / 1.84);
-    entrance.userData.centerX = anchor.x;
-    entrance.userData.centerRange = [getEntranceAnchor({ ...previewShop, entrance: { ...previewShop.entrance, position: 0 } }).x, getEntranceAnchor({ ...previewShop, entrance: { ...previewShop.entrance, position: 1 } }).x];
+    applyEntranceTransform(previewShop, entrance);
   };
   previewDimensions(w, d, h);
   return { group, walls, floor, backWall, leftWall, entrance, doorPivot, doorHit, previewDimensions, previewWallItems, hasFloor: true };

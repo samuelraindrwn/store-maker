@@ -407,7 +407,7 @@ export default function App() {
             <span className="eyebrow">WAJAH BARU TOKOMU</span>
             <div className="exterior-guide-art" aria-hidden="true"><Building2 size={72} strokeWidth={1.2} /><span>{levelCount}F</span></div>
             <h2>Kecil di jalan.<br />Besar idenya.</h2>
-            <p className="muted">Atur warna fasad, bingkai, dan atap. Putar bangunannya untuk menikmati setiap sisi.</p>
+            <p className="muted">Atur warna fasad, lis, dan atap. Putar bangunannya untuk menikmati setiap sisi.</p>
             <div className="building-facts"><span><strong>{levelCount}</strong> lantai</span><span><strong>{getRoof(building).style === 'tiles' ? 'Genteng' : 'Rooftop'}</strong> atap pilihanmu</span></div>
             <div className="level-directory"><span className="field-label">INTIP KE DALAM</span>{Array.from({ length: levelCount }, (_, index) => <button key={index} onClick={() => switchLevel(index)}><Layers3 size={17} /><span><strong>Lantai {index + 1}</strong><small>{getLevelDocument(building, index).items.length} perabot</small></span><ArrowRight size={16} /></button>)}</div>
             <p className="local-note"><CheckCheck size={13} />Semua lantai ikut tersimpan.</p>

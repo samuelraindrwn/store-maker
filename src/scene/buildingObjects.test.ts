@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { createEmptyShop, getWallHeight, type ShopDocument, type ShopItem } from '../model';
+import { createEmptyShop, createInitialShop, getFloorCells, getWallHeight, type ShopDocument, type ShopItem } from '../model';
 import { buildBuilding, buildingEdges, buildStairLandings, getBuildingBounds, LEVEL_SLAB } from './buildingObjects';
 import { applyItemSize, buildItem, disposeGroup } from './objects';
 
@@ -35,16 +35,28 @@ describe('closed multi-floor exterior', () => {
   it.each([1, 2, 3, 4])('stacks %i floors continuously with four enclosing sides and a roof', count => {
     const doc = building(count), group = buildBuilding(doc);
     try {
+      group.updateMatrixWorld(true);
       let y = 0;
       for (let level = 0; level < count; level++) {
         const floor = group.getObjectByName(`exterior-level:${level + 1}`)!;
         expect(floor.position.y).toBeCloseTo(y);
-        expect(named(floor, 'exterior-wall-panel')).toHaveLength(4);
+        // The authored back/left walls stay in place; exterior mode closes the
+        // two cutaway sides around the original ground-floor entrance.
+        expect(named(floor, 'structural-wall-panel')).toHaveLength(2);
+        expect(floor.getObjectByName('exterior-wall:south')).toBeDefined();
+        expect(floor.getObjectByName('exterior-wall:east')).toBeDefined();
+        const panels = [...named(floor, 'structural-wall-panel'), ...named(floor, 'exterior-wall-panel')];
+        for (const [x, z, dx, dz] of [[0, -3.5, 0, 1], [-2.65, 3.5, 0, -1], [-4, 0, 1, 0], [4, 0, -1, 0]]) {
+          const ray = new THREE.Raycaster(new THREE.Vector3(x, y + 1, z), new THREE.Vector3(dx, 0, dz));
+          expect(ray.intersectObjects(panels, false).length).toBeGreaterThan(0);
+        }
+        expect(Boolean(floor.getObjectByName('shop-entrance'))).toBe(level === 0);
         y += getWallHeight(level === 0 ? doc : doc.upperFloors![level - 1]) + LEVEL_SLAB;
       }
       expect(group.getObjectByName('tiled-roof')!.position.y).toBeCloseTo(y - LEVEL_SLAB);
       expect(new THREE.Box3().setFromObject(group).max.y).toBeGreaterThan(y);
-      expect(group.getObjectByName('exterior-entrance')).toBeDefined();
+      expect(named(group, 'shop-entrance')).toHaveLength(1);
+      expect(group.getObjectByName('entrance-canopy')).toBeDefined();
     } finally { disposeGroup(group); }
   });
 
@@ -54,10 +66,65 @@ describe('closed multi-floor exterior', () => {
     try {
       expect(edges).toHaveLength(6);
       expect(edges.reduce((sum, edge) => sum + edge.end - edge.start, 0)).toBe(8);
-      const slabs = group.getObjectByName('building-level-slab') as THREE.InstancedMesh;
+      const slabs = group.getObjectByName('floor-cell-slabs') as THREE.InstancedMesh;
       expect(slabs.count).toBe(3);
+      const roofSlab = group.getObjectByName('roof-slab') as THREE.InstancedMesh;
+      expect(roofSlab.count).toBe(3);
+      group.updateMatrixWorld(true);
+      // Both floor and roof follow the occupied cells, leaving the notch open.
+      for (const slab of [slabs, roofSlab]) {
+        const bounds = new THREE.Box3().setFromObject(slab);
+        expect(bounds.min.x).toBeCloseTo(-3); expect(bounds.max.x).toBeCloseTo(-1);
+        expect(bounds.min.z).toBeCloseTo(-2.5); expect(bounds.max.z).toBeCloseTo(-0.5);
+        expect(new THREE.Raycaster(new THREE.Vector3(-2.5, 20, -2), new THREE.Vector3(0, -1, 0)).intersectObject(slab).length).toBeGreaterThan(0);
+        expect(new THREE.Raycaster(new THREE.Vector3(-1.5, 20, -1), new THREE.Vector3(0, -1, 0)).intersectObject(slab)).toHaveLength(0);
+      }
       const tiles = group.getObjectByName('terracotta-roof-tiles') as THREE.InstancedMesh;
       expect(tiles.count).toBe(36);
+    } finally { disposeGroup(group); }
+  });
+
+  it.each([false, true])('keeps upper-floor support inside its slab allowance and occupied footprint (custom: %s)', custom => {
+    const doc = building(4);
+    if (custom) {
+      for (const floor of doc.upperFloors!) floor.floorCells = [{ x: 0, z: 0 }, { x: 1, z: 0 }, { x: 0, z: 1 }];
+    }
+    const group = buildBuilding(doc);
+    try {
+      group.updateMatrixWorld(true);
+      for (let level = 1; level < 4; level++) {
+        const floor = group.getObjectByName(`exterior-level:${level + 1}`)!;
+        const docFloor = doc.upperFloors![level - 1], cells = getFloorCells(docFloor);
+        const slab = floor.getObjectByName('floor-cell-slabs') as THREE.InstancedMesh;
+        const bounds = new THREE.Box3().setFromObject(slab);
+        expect(slab.count).toBe(cells.length);
+        expect(bounds.min.y).toBeCloseTo(floor.position.y - LEVEL_SLAB);
+        expect(bounds.max.y).toBeCloseTo(floor.position.y - 0.09);
+        expect(bounds.min.x).toBeCloseTo(Math.min(...cells.map(cell => cell.x)) - docFloor.width / 2);
+        expect(bounds.max.x).toBeCloseTo(Math.max(...cells.map(cell => cell.x + 1)) - docFloor.width / 2);
+        expect(bounds.min.z).toBeCloseTo(Math.min(...cells.map(cell => cell.z)) - docFloor.depth / 2);
+        expect(bounds.max.z).toBeCloseTo(Math.max(...cells.map(cell => cell.z + 1)) - docFloor.depth / 2);
+        const tiles = floor.getObjectByName('floor-cell-tiles') as THREE.InstancedMesh;
+        expect(tiles.count).toBe(cells.length);
+        expect(new THREE.Box3().setFromObject(tiles).max.y).toBeCloseTo(floor.position.y + 0.0245);
+      }
+    } finally { disposeGroup(group); }
+  });
+
+  it('leaves the example entrance canopy visible below the upper floor', () => {
+    const group = buildBuilding(createInitialShop());
+    try {
+      group.updateMatrixWorld(true);
+      const canopy = group.getObjectByName('entrance-canopy')!;
+      const upperFloor = group.getObjectByName('exterior-level:2')!.getObjectByName('room-floor')!;
+      // The rear edge is mounted into the facade. Every exposed stripe center
+      // must remain clear of the upstairs floor and its foundation from above.
+      expect(canopy.children).toHaveLength(24);
+      for (const stripe of canopy.children) {
+        const point = stripe.getWorldPosition(new THREE.Vector3());
+        const ray = new THREE.Raycaster(new THREE.Vector3(point.x, 10, point.z), new THREE.Vector3(0, -1, 0));
+        expect(ray.intersectObject(upperFloor, true)).toHaveLength(0);
+      }
     } finally { disposeGroup(group); }
   });
 
@@ -80,8 +147,16 @@ describe('closed multi-floor exterior', () => {
   it('applies facade colors and removes the awning from the whole exterior', () => {
     const group = buildBuilding({ ...building(1), exterior: { wallColor: '#345678', trimColor: '#abcdef', awning: false } });
     try {
-      expect((named(group, 'exterior-wall-panel')[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>).material.color.getHexString()).toBe('345678');
-      expect(group.getObjectByName('exterior-awning')).toBeUndefined();
+      for (const panel of [...named(group, 'structural-wall-panel'), ...named(group, 'exterior-wall-panel')]) {
+        expect((panel as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>).material.color.getHexString()).toBe('345678');
+      }
+      const perimeterTrim = named(group, 'exterior-floor-band');
+      group.traverse(object => { if (object.userData.wallCoping) perimeterTrim.push(object); });
+      expect(perimeterTrim).toHaveLength(4);
+      for (const coping of perimeterTrim) {
+        expect((coping as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>).material.color.getHexString()).toBe('abcdef');
+      }
+      expect(group.getObjectByName('entrance-canopy')).toBeUndefined();
     } finally { disposeGroup(group); }
   });
 });

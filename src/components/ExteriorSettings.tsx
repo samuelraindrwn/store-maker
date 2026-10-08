@@ -12,7 +12,7 @@ export default function ExteriorSettings({ building, onChange }: { building: Sho
     <div className="library-heading"><span className="eyebrow">DARI LUAR, JATUH HATI</span><h2>Satu toko.<br />Banyak cerita.</h2><p>Fasad hangat, atap pilihanmu.</p></div>
     <div className="exterior-section-heading"><Paintbrush size={16} /><h3>Warna bangunan</h3></div>
     <ExteriorColors label="fasad" colors={FACADES} value={exterior.wallColor} onChange={wallColor => onChange(setExterior(building, { wallColor }))} />
-    <ExteriorColors label="bingkai" colors={TRIMS} value={exterior.trimColor} onChange={trimColor => onChange(setExterior(building, { trimColor }))} />
+    <ExteriorColors label="lis fasad" colors={TRIMS} value={exterior.trimColor} onChange={trimColor => onChange(setExterior(building, { trimColor }))} />
     <label className="building-toggle"><span><Sun size={16} /><span>Kanopi toko<small>Naungan di atas pintu masuk.</small></span></span><input type="checkbox" aria-label="Kanopi toko" checked={exterior.awning} onChange={event => onChange(setExterior(building, { awning: event.target.checked }))} /></label>
     <div className="exterior-section-heading roof-heading"><Home size={17} /><h3>Atap pilihanmu</h3></div>
     <div className="roof-options" role="group" aria-label="Jenis atap">
@@ -23,7 +23,7 @@ export default function ExteriorSettings({ building, onChange }: { building: Sho
     </div>
     <ExteriorColors label="atap" colors={ROOFS} value={roof.color} onChange={color => onChange(setRoof(building, { color }))} />
     {roof.style === 'rooftop' && <label className="building-toggle"><span><Flower2 size={16} /><span>Taman rooftop<small>Pergola dan tanaman hijau.</small></span></span><input type="checkbox" aria-label="Taman rooftop" checked={roof.garden} onChange={event => onChange(setRoof(building, { garden: event.target.checked }))} /></label>}
-    <p className="wall-catalog-note">Bentuk fasad mengikuti petak setiap lantai. Pindah ke Interior untuk mengubah bentuk dan menata ruangannya.</p>
+    <p className="wall-catalog-note">Pintu dan jendela mengikuti desain Interior. Pindah ke Interior untuk menggeser pintu, memasang jendela, dan menata ruangan.</p>
   </div>;
 }
 
