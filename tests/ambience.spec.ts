@@ -3,6 +3,7 @@ import type { ShopDocument } from '../src/model';
 
 const SHOP_KEY = 'nemu.store-maker.v1';
 const VOLUME_KEY = 'store-maker.ambience-volume';
+const TRACK_KEY = 'store-maker.ambience-track';
 const SOFTWARE_GL = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 // Unlike user-gesture-required (cross-origin WebAudio only), this policy also
 // blocks a top-level AudioContext until the document receives activation.
@@ -135,15 +136,26 @@ test('music autoplays with real audio, preserves volume and editor behavior, and
   const original = await saved(page);
   await expect(button(page, 'Urungkan')).toBeDisabled();
 
-  await button(page, 'Atur volume musik').click();
+  await button(page, 'Atur musik dan volume').click();
   const volume = page.getByRole('slider', { name: 'Volume musik', exact: true });
+  const track = page.getByRole('combobox', { name: 'Pilihan musik', exact: true });
+  await expect(track).toHaveValue('cheerful');
   await expect(volume).toHaveValue('35');
   for (let step = 0; step < 5; step++) await volume.press('ArrowRight');
   await expect(volume).toHaveValue('40');
   await expect.poll(() => page.evaluate(key => Number(localStorage.getItem(key)), VOLUME_KEY)).toBe(0.4);
+  await track.selectOption('calm');
+  await expectPlaying(page);
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key), TRACK_KEY)).toBe('calm');
+  await expect(volume).toHaveValue('40');
+  await track.selectOption('cheerful');
+  await expectPlaying(page);
+  await track.selectOption('calm');
+  await expectPlaying(page);
+  expect((await audioState(page)).count).toBe(1);
   await volume.press('Escape');
   await expect(volume).toHaveCount(0);
-  await button(page, 'Atur volume musik').click();
+  await button(page, 'Atur musik dan volume').click();
   await expect(volume).toHaveValue('40');
   // On phones the popover legitimately covers the name field below it; the
   // brand link above the popover is an actual, unobstructed outside target.
@@ -154,7 +166,7 @@ test('music autoplays with real audio, preserves volume and editor behavior, and
   await expect(button(page, 'Urungkan')).toBeDisabled();
 
   await expectPlaying(page);
-  await button(page, 'Atur volume musik').click();
+  await button(page, 'Atur musik dan volume').click();
   await page.screenshot({ path: `artifacts/ambience-${info.project.name}.png`, fullPage: true });
   await volume.press('Home');
   await expect(volume).toHaveValue('0');
@@ -189,6 +201,12 @@ test('music autoplays with real audio, preserves volume and editor behavior, and
   await expect(button(page, 'Putar musik cozy')).toHaveAttribute('aria-pressed', 'false');
   await expect.poll(async () => (await audioState(page)).states).toEqual(['suspended']);
   expect(await saved(page)).toEqual(renamed);
+  await button(page, 'Atur musik dan volume').click();
+  await track.selectOption('cheerful');
+  await expect(button(page, 'Putar musik cozy')).toHaveAttribute('aria-pressed', 'false');
+  expect((await audioState(page)).states).toEqual(['suspended']);
+  await track.selectOption('calm');
+  await volume.press('Escape');
   await button(page, 'Putar musik cozy').click();
   await expectPlaying(page);
   expect((await audioState(page)).count).toBe(1);
@@ -198,8 +216,9 @@ test('music autoplays with real audio, preserves volume and editor behavior, and
   await expectPlaying(page);
   expect((await audioState(page)).count).toBe(1);
   await expect.poll(() => saved(page)).toEqual(renamed);
-  await button(page, 'Atur volume musik').click();
+  await button(page, 'Atur musik dan volume').click();
   await expect(volume).toHaveValue('40');
+  await expect(track).toHaveValue('calm');
   expect((await audioState(page)).count).toBe(1);
   await expect(button(page, 'Urungkan')).toBeDisabled();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);

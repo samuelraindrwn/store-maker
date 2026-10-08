@@ -61,7 +61,7 @@ test('shop names repair legacy signs, redraw their textures live, and preserve m
   await expect.poll(() => signText(page)).toBe('Cesco & Co.');
   await expectWallPaint(page, 'Cesco & Co.');
   const renamed = await saved(page);
-  expect(renamed).toEqual({ ...repaired, name: 'Cesco & Co.', wallItems: repaired.wallItems.map(item => item.id === SIGN_ID ? { ...item, text: 'Cesco & Co.' } : item) });
+  expect(renamed).toEqual({ ...repaired, name: 'Cesco & Co.', upperFloors: repaired.upperFloors?.map(floor => ({ ...floor, name: 'Cesco & Co.' })), wallItems: repaired.wallItems.map(item => item.id === SIGN_ID ? { ...item, text: 'Cesco & Co.' } : item) });
   await page.getByLabel('Pilih barang di toko', { exact: true }).selectOption({ value: `wall:${SIGN_ID}` });
   await expect(page.getByLabel('Tulisan papan', { exact: true })).toHaveValue('Cesco & Co.');
   await page.screenshot({ path: `artifacts/shop-name-${info.project.name}.png`, fullPage: true });

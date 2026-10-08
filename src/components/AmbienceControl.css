@@ -16,6 +16,9 @@
 .ambience-title strong{font-size:12px;color:#483751}
 .ambience-title>span{margin-left:auto;font-size:9px;color:#94819e}
 .ambience-popover p{font-size:11px;line-height:1.7;margin:10px 0 16px;color:#8a7a94}
+.ambience-track-label{display:block;font-size:10px;font-weight:800;margin-bottom:6px}
+.ambience-track{display:block;width:100%;min-width:0;min-height:36px;border:1px solid #e4dcec;border-radius:9px;padding:7px 9px;margin:0 0 16px;background:#fcf9ff;color:#645073;font:inherit;font-size:11px;cursor:pointer}
+.ambience-track:focus-visible{outline:2px solid #8456d8;outline-offset:2px}
 .ambience-volume-label{display:flex;justify-content:space-between;font-size:10px;font-weight:800}
 .ambience-volume-label output{font-weight:600;color:#8d789e;font-variant-numeric:tabular-nums}
 .ambience-volume-row{display:flex;gap:10px;align-items:center;margin-top:4px}

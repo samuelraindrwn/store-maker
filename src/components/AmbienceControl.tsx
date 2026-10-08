@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, Music2, Pause, Volume2, VolumeX } from 'lucide-react';
-import { CozyAmbience } from '../audio/CozyAmbience';
+import { CozyAmbience, type AmbienceTrack } from '../audio/CozyAmbience';
 import './AmbienceControl.css';
 
 const VOLUME_KEY = 'store-maker.ambience-volume';
+const TRACK_KEY = 'store-maker.ambience-track';
+
+function savedTrack(): AmbienceTrack {
+  try { if (localStorage.getItem(TRACK_KEY) === 'calm') return 'calm'; } catch { /* Session-only music. */ }
+  return 'cheerful';
+}
 
 function savedVolume() {
   try {
@@ -18,11 +24,13 @@ export default function AmbienceControl() {
   const [enabled, setEnabled] = useState(true);
   const [playing, setPlaying] = useState(false);
   const [volume, setVolume] = useState(savedVolume);
+  const [track, setTrack] = useState(savedTrack);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
   const engine = useRef<CozyAmbience | null>(null);
   const wanted = useRef(true);
   const currentVolume = useRef(volume);
+  const currentTrack = useRef(track);
   const request = useRef(0);
   const root = useRef<HTMLDivElement>(null);
   const settings = useRef<HTMLButtonElement>(null);
@@ -34,6 +42,11 @@ export default function AmbienceControl() {
     try { localStorage.setItem(VOLUME_KEY, String(volume)); } catch { /* Session-only volume. */ }
   }, [volume]);
 
+  useEffect(() => {
+    currentTrack.current = track;
+    try { localStorage.setItem(TRACK_KEY, track); } catch { /* Session-only music. */ }
+  }, [track]);
+
   const start = useCallback(async (manual = false) => {
     if (!wanted.current || document.hidden) return;
     const token = ++request.current;
@@ -41,6 +54,7 @@ export default function AmbienceControl() {
     try {
       const player = engine.current ??= new CozyAmbience();
       player.setVolume(currentVolume.current);
+      player.setTrack(currentTrack.current);
       await player.play();
       if (token === request.current && wanted.current) setPlaying(true);
     } catch {
@@ -133,11 +147,20 @@ export default function AmbienceControl() {
         {playing ? <Pause size={15} /> : <Music2 size={15} />}<span>Cozy</span>
         {playing && <span className="ambience-bars" aria-hidden="true"><i /><i /><i /></span>}
       </button>
-      <button ref={settings} className="ambience-settings" type="button" aria-label="Atur volume musik" aria-expanded={open} aria-controls="ambience-settings" onClick={() => setOpen(value => !value)} title="Atur volume musik"><ChevronDown size={14} /></button>
+      <button ref={settings} className="ambience-settings" type="button" aria-label="Atur musik dan volume" aria-expanded={open} aria-controls="ambience-settings" onClick={() => setOpen(value => !value)} title="Atur musik dan volume"><ChevronDown size={14} /></button>
     </div>
     {open && <div className="ambience-popover" id="ambience-settings" role="dialog" aria-label="Pengaturan musik">
       <div className="ambience-title"><Music2 size={17} /><strong>Suasana toko</strong><span>{playing ? 'Mengalun' : enabled ? 'Siap diputar' : 'Dijeda'}</span></div>
-      <p>Piano hangat, gerimis pelan.<br />Teman bikin toko kecilmu.</p>
+      <p>{track === 'cheerful' ? 'Melodi ceria, petikan ringan. Serasa membangun toko di cozy game.' : 'Piano hangat, gerimis pelan. Teman santai bikin toko kecilmu.'}</p>
+      <label className="ambience-track-label" htmlFor="ambience-track">Pilihan musik</label>
+      <select className="ambience-track" id="ambience-track" value={track} onChange={event => {
+        const next = event.currentTarget.value as AmbienceTrack;
+        currentTrack.current = next; setTrack(next); engine.current?.setTrack(next);
+        if (wanted.current && !playing) void start(true);
+      }}>
+        <option value="cheerful">Ceria · Cozy game</option>
+        <option value="calm">Santai · Piano & gerimis</option>
+      </select>
       <label className="ambience-volume-label" htmlFor="ambience-volume"><span>Volume</span><output>{Math.round(volume * 100)}%</output></label>
       <div className="ambience-volume-row">{volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}<input ref={slider} id="ambience-volume" aria-label="Volume musik" aria-valuetext={`${Math.round(volume * 100)} persen`} type="range" min={0} max={100} step={1} value={Math.round(volume * 100)} onChange={event => {
         const next = Number(event.currentTarget.value) / 100;

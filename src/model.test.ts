@@ -13,8 +13,8 @@ const item = (kind: ItemKind, x: number, z: number, patch: Partial<ShopItem> = {
 })
 
 describe('catalog and starter shops', () => {
-  it('provides twenty-two unique kinds with the expected footprints', () => {
-    expect(CATALOG.map(entry => entry.kind)).toEqual(['shelf', 'table', 'counter', 'rack', 'plant', 'rug', 'lamp', 'stool', 'chalkboard', 'poster-stand', 'direction-sign', 'glass-cabinet', 'display-plinth', 'pegboard', 'food-display', 'drinks-fridge', 'coffee-station', 'prep-counter', 'stove', 'sink', 'dining-table', 'service-cart'])
+  it('provides twenty-five unique kinds with the expected footprints', () => {
+    expect(CATALOG.map(entry => entry.kind)).toEqual(['shelf', 'table', 'counter', 'rack', 'plant', 'rug', 'lamp', 'stool', 'chalkboard', 'poster-stand', 'direction-sign', 'glass-cabinet', 'display-plinth', 'pegboard', 'food-display', 'drinks-fridge', 'coffee-station', 'prep-counter', 'stove', 'sink', 'dining-table', 'service-cart', 'stairs', 'warehouse-rack', 'bathroom'])
     expect(CATALOG.map(entry => [entry.kind, entry.width, entry.depth])).toEqual([
       ['shelf', 2, 1], ['table', 2, 2], ['counter', 2, 1], ['rack', 2, 1],
       ['plant', 1, 1], ['rug', 2, 2], ['lamp', 1, 1], ['stool', 1, 1],
@@ -22,6 +22,7 @@ describe('catalog and starter shops', () => {
       ['glass-cabinet', 2, 1], ['display-plinth', 1, 1], ['pegboard', 2, 1],
       ['food-display', 2, 1], ['drinks-fridge', 1, 1], ['coffee-station', 2, 1],
       ['prep-counter', 2, 1], ['stove', 2, 1], ['sink', 2, 1], ['dining-table', 2, 2], ['service-cart', 1, 1],
+      ['stairs', 2, 3], ['warehouse-rack', 2, 1], ['bathroom', 2, 2],
     ])
   })
 

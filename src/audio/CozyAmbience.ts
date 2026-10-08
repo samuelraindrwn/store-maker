@@ -1,15 +1,16 @@
 type Voice = { sources: OscillatorNode[]; nodes: AudioNode[]; envelope: GainNode; released: boolean };
 type Note = { beat: number; midi: number; length: number; level: number; bass?: boolean };
+export type AmbienceTrack = 'cheerful' | 'calm';
 type Graph = {
   master: GainNode;
   piano: BiquadFilterNode;
   bass: BiquadFilterNode;
   rain: AudioBufferSourceNode;
+  rainLevel: GainNode;
+  wet: GainNode;
   nodes: AudioNode[];
 };
 
-const BPM = 72;
-const BEAT = 60 / BPM;
 const SCORE_BEATS = 32;
 const LOOK_AHEAD = 0.18;
 const FADE_OUT = 0.18;
@@ -26,11 +27,34 @@ const MELODIES = [
   [[1.5, 76], [3, 74]], [[2.5, 71]], [[1.75, 72], [3.25, 76]], [[2, 74]],
   [[1.5, 77], [3, 76]], [[2.25, 74], [3.25, 71]], [[1.5, 72]], [[2.75, 67]],
 ];
-const SCORE: Note[] = CHORDS.flatMap((chord, bar) => [
+const CALM_SCORE: Note[] = CHORDS.flatMap((chord, bar) => [
   ...chord.map((midi, index) => ({ beat: bar * 4 + index * 0.075, midi, length: 3.8, level: 0.085 - index * 0.004 })),
   { beat: bar * 4 + 0.02, midi: BASSES[bar], length: 3.5, level: 0.13, bass: true },
   ...MELODIES[bar].map(([beat, midi]) => ({ beat: bar * 4 + beat, midi, length: 1.8, level: 0.065 })),
 ]).sort((a, b) => a.beat - b.beat);
+
+// A second original eight-bar tune: lilting wooden-key melody, light plucked
+// arpeggios, and a bouncing root/fifth bass. No samples or external downloads.
+const CHEERFUL_CHORDS = [
+  [60, 64, 67], [60, 64, 69], [60, 65, 69], [59, 62, 67],
+  [60, 64, 67], [60, 64, 69], [60, 65, 69], [59, 62, 67],
+];
+const CHEERFUL_MELODIES = [
+  [76, 79, 81, 79, 76, 74], [72, 76, 79, 81, 79, 76],
+  [77, 81, 84, 81, 79, 77], [74, 76, 79, 77, 76, 74],
+  [76, 79, 84, 83, 81, 79], [81, 79, 76, 74, 72, 76],
+  [77, 79, 81, 79, 77, 74], [74, 71, 74, 79, 76, 72],
+];
+const CHEERFUL_BASSES = [36, 45, 41, 43, 36, 45, 41, 43];
+const CHEERFUL_SCORE: Note[] = CHEERFUL_CHORDS.flatMap((chord, bar) => [
+  ...[0, 1, 2, 1].map((tone, index) => ({ beat: bar * 4 + index + 0.02, midi: chord[tone], length: 0.95, level: 0.075 })),
+  ...[0, 2].map((beat, index) => ({ beat: bar * 4 + beat, midi: CHEERFUL_BASSES[bar] + index * 7, length: 1.2, level: 0.13, bass: true })),
+  ...CHEERFUL_MELODIES[bar].map((midi, index) => ({ beat: bar * 4 + [0, 0.6, 1, 2, 2.6, 3][index], midi, length: 0.9, level: index === 0 || index === 3 ? 0.1 : 0.08 })),
+]).sort((a, b) => a.beat - b.beat);
+const TRACKS = {
+  cheerful: { beat: 60 / 104, score: CHEERFUL_SCORE, rain: 0, filter: 3800, reverb: 0.12 },
+  calm: { beat: 60 / 72, score: CALM_SCORE, rain: 0.014, filter: 2300, reverb: 0.23 },
+} satisfies Record<AmbienceTrack, { beat: number; score: Note[]; rain: number; filter: number; reverb: number }>;
 
 function audioConstructor(): typeof AudioContext | undefined {
   return globalThis.AudioContext ?? (globalThis as typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -65,6 +89,7 @@ export class CozyAmbience {
   private context: AudioContext | null = null;
   private graph: Graph | null = null;
   private volume = 0.35;
+  private track: AmbienceTrack = 'cheerful';
   private wanted = false;
   private disposed = false;
   private generation = 0;
@@ -128,6 +153,24 @@ export class CozyAmbience {
     }
   }
 
+  /** Switch the score without resuming a paused player or adding a scheduler. */
+  setTrack(value: AmbienceTrack): void {
+    if (this.disposed || !Object.hasOwn(TRACKS, value) || value === this.track) return;
+    this.track = value;
+    const context = this.context;
+    if (!context || !this.graph) return;
+    const now = context.currentTime;
+    const track = TRACKS[value];
+    ramp(this.graph.rainLevel.gain, track.rain, now, 0.25);
+    ramp(this.graph.piano.frequency, track.filter, now, 0.18);
+    ramp(this.graph.wet.gain, track.reverb, now, 0.25);
+    this.releaseVoices(now, 0.12);
+    this.scoreStart = now + 0.14;
+    this.scoreLoop = 0;
+    this.eventIndex = 0;
+    if (this.scheduler !== null) this.schedule();
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -181,12 +224,13 @@ export class CozyAmbience {
   }
 
   private createGraph(context: AudioContext): Graph {
+    const track = TRACKS[this.track];
     const master = context.createGain(); master.gain.value = 0;
     const compressor = context.createDynamicsCompressor();
     compressor.threshold.value = -18; compressor.knee.value = 18; compressor.ratio.value = 3;
     compressor.attack.value = 0.008; compressor.release.value = 0.3;
     const music = context.createGain();
-    const piano = context.createBiquadFilter(); piano.type = 'lowpass'; piano.frequency.value = 2300; piano.Q.value = 0.45;
+    const piano = context.createBiquadFilter(); piano.type = 'lowpass'; piano.frequency.value = track.filter; piano.Q.value = 0.45;
     const bass = context.createBiquadFilter(); bass.type = 'lowpass'; bass.frequency.value = 550; bass.Q.value = 0.4;
     piano.connect(music); bass.connect(music);
     const dry = context.createGain(); dry.gain.value = 0.85;
@@ -204,7 +248,7 @@ export class CozyAmbience {
       }
     }
     reverb.buffer = impulse;
-    const wet = context.createGain(); wet.gain.value = 0.23;
+    const wet = context.createGain(); wet.gain.value = track.reverb;
     music.connect(reverb); reverb.connect(wet); wet.connect(compressor);
 
     const rain = context.createBufferSource();
@@ -215,48 +259,52 @@ export class CozyAmbience {
     rain.buffer = rainBuffer; rain.loop = true;
     const rainLow = context.createBiquadFilter(); rainLow.type = 'lowpass'; rainLow.frequency.value = 1500; rainLow.Q.value = 0.35;
     const rainHigh = context.createBiquadFilter(); rainHigh.type = 'highpass'; rainHigh.frequency.value = 450; rainHigh.Q.value = 0.35;
-    const rainLevel = context.createGain(); rainLevel.gain.value = 0.014;
+    const rainLevel = context.createGain(); rainLevel.gain.value = track.rain;
     rain.connect(rainLow); rainLow.connect(rainHigh); rainHigh.connect(rainLevel); rainLevel.connect(compressor);
     compressor.connect(master); master.connect(context.destination);
     rain.start();
-    return { master, piano, bass, rain, nodes: [master, compressor, music, piano, bass, dry, reverb, wet, rain, rainLow, rainHigh, rainLevel] };
+    return { master, piano, bass, rain, rainLevel, wet, nodes: [master, compressor, music, piano, bass, dry, reverb, wet, rain, rainLow, rainHigh, rainLevel] };
   }
 
   private schedule() {
     const context = this.context;
     if (!context || !this.graph || !this.wanted || this.disposed || context.state !== 'running') return;
+    const { beat, score } = TRACKS[this.track];
     const now = context.currentTime;
-    const cycle = SCORE_BEATS * BEAT;
+    const cycle = SCORE_BEATS * beat;
     // Background throttling must skip missed bars, not allocate a burst of notes.
     if (this.scoreStart + (this.scoreLoop + 1) * cycle < now) {
       this.scoreLoop = Math.max(0, Math.floor((now - this.scoreStart) / cycle));
       this.eventIndex = 0;
     }
     while (true) {
-      const note = SCORE[this.eventIndex];
-      const when = this.scoreStart + this.scoreLoop * cycle + note.beat * BEAT;
+      const note = score[this.eventIndex];
+      const when = this.scoreStart + this.scoreLoop * cycle + note.beat * beat;
       if (when > now + LOOK_AHEAD) break;
       if (when >= now - 0.025 && this.voices.size < MAX_VOICES) this.note(note, Math.max(when, now));
       this.eventIndex++;
-      if (this.eventIndex === SCORE.length) { this.eventIndex = 0; this.scoreLoop++; }
+      if (this.eventIndex === score.length) { this.eventIndex = 0; this.scoreLoop++; }
     }
   }
 
   private note(note: Note, when: number) {
     const context = this.context!;
+    const cheerful = this.track === 'cheerful';
     const envelope = context.createGain();
     const fundamental = context.createOscillator();
     const warmth = context.createOscillator();
-    const overtone = context.createGain(); overtone.gain.value = note.bass ? 0.12 : 0.22;
+    const overtone = context.createGain(); overtone.gain.value = note.bass ? 0.12 : cheerful ? 0.3 : 0.22;
     const frequency = 440 * 2 ** ((note.midi - 69) / 12);
     fundamental.type = 'sine'; fundamental.frequency.value = frequency;
-    warmth.type = 'triangle'; warmth.frequency.value = frequency; warmth.detune.value = note.bass ? 0 : 1.7;
+    warmth.type = cheerful && !note.bass ? 'sine' : 'triangle';
+    warmth.frequency.value = frequency * (cheerful && !note.bass ? 3 : 1);
+    warmth.detune.value = note.bass || cheerful ? 0 : 1.7;
     fundamental.connect(envelope); warmth.connect(overtone); overtone.connect(envelope);
     envelope.connect(note.bass ? this.graph!.bass : this.graph!.piano);
-    const end = when + note.length * BEAT;
+    const end = when + note.length * TRACKS[this.track].beat;
     envelope.gain.setValueAtTime(0, when);
-    envelope.gain.linearRampToValueAtTime(note.level, when + (note.bass ? 0.065 : 0.028));
-    envelope.gain.exponentialRampToValueAtTime(note.level * 0.24, when + 0.65);
+    envelope.gain.linearRampToValueAtTime(note.level, when + (cheerful ? 0.008 : note.bass ? 0.065 : 0.028));
+    envelope.gain.exponentialRampToValueAtTime(note.level * (cheerful ? 0.3 : 0.24), when + (cheerful ? 0.12 : 0.65));
     envelope.gain.exponentialRampToValueAtTime(0.0001, end - 0.08);
     envelope.gain.linearRampToValueAtTime(0, end);
     const voice: Voice = { sources: [fundamental, warmth], nodes: [fundamental, warmth, overtone, envelope], envelope, released: false };

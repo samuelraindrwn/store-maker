@@ -117,7 +117,7 @@ describe('CozyAmbience lifecycle and bounded musical scheduling', () => {
   it('does not allocate or play audio during construction, feature detection, volume changes, or an idle pause', () => {
     const music = player();
     expect(supported()).toBe(true);
-    music.setVolume(0.8); music.pause(); music.dispose();
+    music.setVolume(0.8); music.setTrack('calm'); music.setTrack('cheerful'); music.pause(); music.dispose();
     expect(Context.created).toHaveLength(0);
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -282,8 +282,80 @@ describe('CozyAmbience lifecycle and bounded musical scheduling', () => {
     expect(output.gain.events.at(-1)?.value).toBe(0.7);
   });
 
-  it('keeps the musical voice count bounded across repeated bars and skips delayed scheduling instead of bursting', async () => {
+  it('defaults to a bright plucked tune and switches to piano on the existing graph and scheduler', async () => {
     const music = player(); await music.play();
+    const context = Context.created[0];
+    const original = oscillators(context);
+    // The wooden-key melody has sine overtones a twelfth above its fundamental.
+    expect(original.some((source, index) => index % 2 === 1 && source.type === 'sine' && source.frequency.value === original[index - 1].frequency.value * 3)).toBe(true);
+    const count = context.nodes.length;
+    music.setTrack('cheerful');
+    expect(context.nodes).toHaveLength(count);
+    music.setTrack('calm');
+    expect(original.every(source => source.stopAt! <= context.currentTime + 0.15)).toBe(true);
+    advance(240);
+    expect(original.every(source => source.disconnected)).toBe(true);
+    const piano = oscillators(context).filter(source => !original.includes(source));
+    expect(piano.length).toBeGreaterThan(0);
+    expect(piano.some(source => source.type === 'triangle')).toBe(true);
+    expect(Context.created).toHaveLength(1);
+    expect(context.nodes.filter(node => node.kind === 'buffer-source')).toHaveLength(1);
+    expect(context.nodes.filter(node => node.kind === 'convolver')).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(1);
+    expect(master(context).gain.value).toBe(0.35);
+  });
+
+  it('keeps pause and volume authoritative when changing music during the fade and after suspension', async () => {
+    const music = player(); music.setVolume(0.22); await music.play();
+    const context = Context.created[0];
+    music.pause(); music.setTrack('calm');
+    const count = oscillators(context).length;
+    advance(300); await Promise.resolve();
+    music.setTrack('cheerful'); music.setTrack('calm');
+    expect(oscillators(context)).toHaveLength(count);
+    expect(context.state).toBe('suspended');
+    expect(master(context).gain.value).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    await music.play();
+    expect(master(context).gain.value).toBe(0.22);
+    expect(oscillators(context).slice(count).some(source => source.type === 'triangle')).toBe(true);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('uses the latest selected score when a blocked autoplay resume eventually resolves', async () => {
+    const gate = deferred(); Context.nextResumeGate = gate.promise;
+    const music = player(); const pending = music.play();
+    const context = Context.created[0];
+    music.setTrack('calm');
+    expect(oscillators(context)).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    gate.resolve(); await pending;
+    expect(oscillators(context).some(source => source.type === 'triangle')).toBe(true);
+    expect(vi.getTimerCount()).toBe(1);
+    music.dispose(); music.setTrack('cheerful'); advance(1000);
+    expect(context.state).toBe('closed');
+    expect(context.nodes.every(node => node.disconnected)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('bounds resources during rapid track changes and recovers musical scheduling afterwards', async () => {
+    const music = player(); await music.play();
+    const context = Context.created[0];
+    for (let index = 0; index < 80; index++) {
+      music.setTrack(index % 2 === 0 ? 'calm' : 'cheerful');
+      advance(40);
+      expect(oscillators(context).filter(source => !source.disconnected).length).toBeLessThanOrEqual(72);
+    }
+    advance(1000);
+    expect(oscillators(context).some(source => !source.disconnected)).toBe(true);
+    expect(vi.getTimerCount()).toBe(1);
+    expect(context.resumeCalls).toBe(1);
+    expect(context.suspendCalls).toBe(0);
+    expect(Context.created).toHaveLength(1);
+  });
+
+  it.each(['cheerful', 'calm'] as const)('keeps the %s voice count bounded across repeated bars and skips delayed scheduling instead of bursting', async track => {
+    const music = player(); music.setTrack(track); await music.play();
     const context = Context.created[0];
     let peak = 0;
     for (let second = 0; second < 120; second++) {

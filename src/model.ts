@@ -1,5 +1,6 @@
 export type ItemKind = 'shelf' | 'table' | 'counter' | 'rack' | 'plant' | 'rug' | 'lamp' | 'stool' | 'chalkboard' | 'poster-stand' | 'direction-sign'
   | 'glass-cabinet' | 'display-plinth' | 'pegboard' | 'food-display' | 'drinks-fridge' | 'coffee-station' | 'prep-counter' | 'stove' | 'sink' | 'dining-table' | 'service-cart'
+  | 'stairs' | 'warehouse-rack' | 'bathroom'
 export type ProductKind = 'books' | 'ceramics' | 'plants' | 'fashion' | 'vinyl' | 'shoes' | 'bags' | 'skincare' | 'toys'
   | 'bread' | 'pastries' | 'drinks' | 'fruit' | 'meals' | 'snacks' | 'none'
 export type Rotation = 0 | 90 | 180 | 270
@@ -59,7 +60,15 @@ export interface ShopDocument {
   entrance?: Entrance
   floorCells?: FloorCell[]
   wallItems?: WallItem[]
+  /** Floors above the ground floor, ordered from level two through four. */
+  upperFloors?: ShopDocument[]
+  roof?: RoofDesign
+  exterior?: ExteriorDesign
 }
+
+export interface RoofDesign { style: 'tiles' | 'rooftop'; color: string; garden: boolean }
+export interface ExteriorDesign { wallColor: string; trimColor: string; awning: boolean }
+export const MAX_LEVELS = 4
 
 export interface CatalogEntry {
   kind: ItemKind
@@ -94,6 +103,9 @@ export const CATALOG: CatalogEntry[] = [
   { kind: 'sink', name: 'Bak cuci', description: 'Tempat mencuci dan merapikan perlengkapan dapur.', width: 2, depth: 1, color: '#B5C8C4', stockable: false },
   { kind: 'dining-table', name: 'Meja makan', description: 'Tempat menikmati hidangan di dalam kedai.', width: 2, depth: 2, color: '#C5A37C', stockable: false },
   { kind: 'service-cart', name: 'Troli saji', description: 'Troli ringkas untuk makanan dan minuman siap diantar.', width: 1, depth: 1, color: '#BFA6C9', stockable: true },
+  { kind: 'stairs', name: 'Tangga', description: 'Tangga dengan pegangan untuk menghubungkan lantai toko.', width: 2, depth: 3, color: '#BB9775', stockable: false },
+  { kind: 'warehouse-rack', name: 'Rak gudang', description: 'Rak penyimpanan tinggi dengan kardus stok yang tertata rapi.', width: 2, depth: 1, color: '#7E9E9C', stockable: false },
+  { kind: 'bathroom', name: 'WC / kamar mandi', description: 'Kamar mandi kecil dengan toilet, wastafel, dan dinding privasi.', width: 2, depth: 2, color: '#B4CDC8', stockable: false },
 ]
 
 export const FOOD_ITEM_KINDS: readonly ItemKind[] = Object.freeze([
@@ -136,12 +148,13 @@ const optionalItemKeys = ['width', 'depth'] as const
 const allowedItemKeys = [...itemKeys, ...optionalItemKeys] as const
 const documentKeys = ['version', 'name', 'width', 'depth', 'wallColor', 'floorColor', 'items'] as const
 const optionalDocumentKeys = ['wallHeight', 'entrance', 'floorCells', 'wallItems'] as const
+const buildingDocumentKeys = ['upperFloors', 'roof', 'exterior'] as const
 const wallItemKeys = ['id', 'kind', 'wall', 'line', 'offset', 'height', 'color', 'text', 'lit'] as const
 const optionalWallItemKeys = ['width', 'sizeHeight', 'windowStyle'] as const
 const allowedWallItemKeys = [...wallItemKeys, ...optionalWallItemKeys] as const
 const MAX_WALL_ITEMS = 60
 const MAX_ITEMS = 200
-const MAX_JSON_LENGTH = 128_000
+const MAX_JSON_LENGTH = 128_000 * MAX_LEVELS
 const own = (object: object, key: PropertyKey) => Object.prototype.hasOwnProperty.call(object, key)
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -174,6 +187,16 @@ function isDimension(value: unknown): value is number {
 
 function isColor(value: unknown): value is string {
   return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)
+}
+
+function isRoofDesign(value: unknown): value is RoofDesign {
+  return isRecord(value) && exactKeys(value, ['style', 'color', 'garden'])
+    && (value.style === 'tiles' || value.style === 'rooftop') && isColor(value.color) && typeof value.garden === 'boolean'
+}
+
+function isExteriorDesign(value: unknown): value is ExteriorDesign {
+  return isRecord(value) && exactKeys(value, ['wallColor', 'trimColor', 'awning'])
+    && isColor(value.wallColor) && isColor(value.trimColor) && typeof value.awning === 'boolean'
 }
 
 function isWallHeight(value: unknown): value is number {
@@ -320,8 +343,10 @@ export function renameShop(doc: ShopDocument, name: string): ShopDocument {
     changed = true
     return { ...item, text: signName }
   })
+  // The input can temporarily be empty while typing; saved upper floors still need valid names.
+  const upperFloors = name !== doc.name ? doc.upperFloors?.map(level => renameShop(level, signName)) : doc.upperFloors
   if (name === doc.name && !changed) return doc
-  return { ...doc, name, ...(changed ? { wallItems } : {}) }
+  return { ...doc, name, ...(changed ? { wallItems } : {}), ...(upperFloors ? { upperFloors } : {}) }
 }
 
 /** Old documents get only the decorative defaults that physically fit their contour. */
@@ -639,6 +664,105 @@ export function createBlankShop(): ShopDocument {
   return { ...createEmptyShop(), floorCells: [] }
 }
 
+export function getLevelCount(doc: ShopDocument): number { return 1 + (doc.upperFloors?.length ?? 0) }
+
+/** Indices start at zero. Ground-floor edits are merged back with replaceLevelDocument. */
+export function getLevelDocument(doc: ShopDocument, index: number): ShopDocument {
+  if (!Number.isInteger(index) || index < 0 || index >= getLevelCount(doc)) throw new RangeError('Invalid floor index')
+  return index === 0 ? doc : doc.upperFloors![index - 1]
+}
+
+/** Defaults remain virtual so opening a legacy design never changes its saved shape. */
+export function getRoof(doc: ShopDocument): RoofDesign {
+  return doc.roof ? { ...doc.roof } : { style: 'tiles', color: '#B96B51', garden: false }
+}
+
+export function getExterior(doc: ShopDocument): ExteriorDesign {
+  return doc.exterior ? { ...doc.exterior } : { wallColor: '#EADCCA', trimColor: '#847293', awning: true }
+}
+
+export function setRoof(doc: ShopDocument, patch: Partial<RoofDesign>): ShopDocument {
+  if (!isRecord(patch) || Reflect.ownKeys(patch).some(key => key !== 'style' && key !== 'color' && key !== 'garden')) return doc
+  const current = getRoof(doc)
+  const roof = { ...current, ...patch }
+  if (!isRoofDesign(roof) || (current.style === roof.style && current.color === roof.color && current.garden === roof.garden)) return doc
+  return { ...doc, roof }
+}
+
+export function setExterior(doc: ShopDocument, patch: Partial<ExteriorDesign>): ShopDocument {
+  if (!isRecord(patch) || Reflect.ownKeys(patch).some(key => key !== 'wallColor' && key !== 'trimColor' && key !== 'awning')) return doc
+  const current = getExterior(doc)
+  const exterior = { ...current, ...patch }
+  if (!isExteriorDesign(exterior) || (current.wallColor === exterior.wallColor && current.trimColor === exterior.trimColor && current.awning === exterior.awning)) return doc
+  return { ...doc, exterior }
+}
+
+function floorOnly(doc: ShopDocument): ShopDocument {
+  const result = { ...doc }
+  delete result.upperFloors
+  delete result.roof
+  delete result.exterior
+  return result
+}
+
+/** A floor replacement cannot overwrite another level or the building's roof and facade. */
+export function replaceLevelDocument(doc: ShopDocument, index: number, next: ShopDocument): ShopDocument {
+  if (!Number.isInteger(index) || index < 0 || index >= getLevelCount(doc)) return doc
+  if (getLevelDocument(doc, index) === next) return doc
+  const floor = parseFloor(floorOnly(next), false)
+  if (!floor) return doc
+  if (index === 0) {
+    return { ...floor, ...(doc.upperFloors ? { upperFloors: doc.upperFloors } : {}),
+      ...(doc.roof ? { roof: doc.roof } : {}), ...(doc.exterior ? { exterior: doc.exterior } : {}) }
+  }
+  return { ...doc, upperFloors: doc.upperFloors!.map((level, i) => i === index - 1 ? floor : level) }
+}
+
+function addConnectingStairs(lower: ShopDocument, upper: ShopDocument, preferred?: ShopItem): ShopDocument {
+  if (lower.items.some(item => item.kind === 'stairs')) return lower
+  const stairs = createItem('stairs')
+  const bounds = getFloorBounds(lower)
+  const candidates: ShopItem[] = preferred ? [{ ...stairs, x: preferred.x, z: preferred.z, rotation: preferred.rotation }] : []
+  for (const rotation of [0, 90] as const) {
+    for (let z = bounds.minZ; z <= bounds.maxZ; z++) for (let x = bounds.minX; x <= bounds.maxX; x++) candidates.push({ ...stairs, x, z, rotation })
+  }
+  for (const candidate of candidates) {
+    if (!canPlace(lower, candidate)) continue
+    const footprint = getItemFootprint(candidate)
+    let supported = true
+    for (let x = candidate.x; x < candidate.x + footprint.width; x++) for (let z = candidate.z; z < candidate.z + footprint.depth; z++) {
+      if (!hasFloorCell(upper, x, z)) supported = false
+    }
+    if (supported) return placeItem(lower, candidate)
+  }
+  return lower
+}
+
+/** New levels inherit the top floor's contour; occupied layouts are never rearranged. */
+export function setLevelCount(doc: ShopDocument, count: number): ShopDocument {
+  if (!Number.isInteger(count) || count < 1 || count > MAX_LEVELS || count === getLevelCount(doc)) return doc
+  const oldCount = getLevelCount(doc)
+  const floors = [floorOnly(doc), ...(doc.upperFloors ?? [])].slice(0, count)
+  while (floors.length < count) {
+    const previous = floors[floors.length - 1]
+    const next: ShopDocument = {
+      version: 2, name: doc.name, width: previous.width, depth: previous.depth,
+      wallColor: previous.wallColor, floorColor: previous.floorColor, items: [], wallItems: [],
+      ...(previous.wallHeight === undefined ? {} : { wallHeight: previous.wallHeight }),
+      ...(previous.floorCells ? { floorCells: getFloorCells(previous) } : {}),
+    }
+    floors.push(next)
+  }
+  for (let index = oldCount - 1; index < count - 1; index++) {
+    const preferred = index > 0 ? floors[index - 1].items.find(item => item.kind === 'stairs') : undefined
+    floors[index] = addConnectingStairs(floors[index], floors[index + 1], preferred)
+  }
+  const result = { ...doc, items: floors[0].items }
+  if (count === 1) delete result.upperFloors
+  else result.upperFloors = floors.slice(1)
+  return result
+}
+
 /** Materialize the old fixed sidewalk decoration once, without replacing saved items. */
 function addDefaultStandingSign(doc: ShopDocument): ShopDocument {
   const id = 'sidewalk-chalkboard'
@@ -676,9 +800,23 @@ export function createInitialShop(): ShopDocument {
       make('display-table', 'table', 3, 2),
       make('checkout', 'counter', 0, 4),
       make('little-seat', 'stool', 2, 4),
-      make('green-corner', 'plant', 0, 2),
+      make('green-corner', 'plant', 0, 5),
       make('front-plant', 'plant', 6, 5, { color: '#B797C8' }),
+      make('ground-stairs', 'stairs', 0, 1),
+      make('ground-bathroom', 'bathroom', 5, 1),
     ],
+    upperFloors: [{
+      ...createEmptyShop(), name: 'Sudut Cerita', floorColor: '#D9CBB6',
+      items: [
+        make('warehouse-rack-a', 'warehouse-rack', 0, 0),
+        make('warehouse-rack-b', 'warehouse-rack', 3, 0),
+        make('warehouse-rack-c', 'warehouse-rack', 5, 0),
+        make('warehouse-rack-d', 'warehouse-rack', 3, 3),
+        make('warehouse-rack-e', 'warehouse-rack', 5, 3),
+      ],
+    }],
+    roof: { style: 'tiles', color: '#B96B51', garden: false },
+    exterior: { wallColor: '#EADCCA', trimColor: '#847293', awning: true },
   }
   delete shop.wallItems
   shop.wallItems = getWallItems(shop)
@@ -723,8 +861,20 @@ export function parseShop(input: unknown): ShopDocument | null {
       if (value.length > MAX_JSON_LENGTH) return null
       value = JSON.parse(value) as unknown
     }
+    return parseFloor(value, true)
+  } catch {
+    return null
+  }
+}
+
+/** Upper floors cannot contain another building, keeping validation and save size bounded. */
+function parseFloor(value: unknown, allowBuilding: boolean): ShopDocument | null {
     if (!isRecord(value) || (value.version !== 1 && value.version !== 2)) return null
-    if (!documentKeys.every(key => own(value, key)) || Reflect.ownKeys(value).some(key => typeof key !== 'string' || ![...documentKeys, ...optionalDocumentKeys].includes(key as typeof documentKeys[number]))) return null
+    const optionalKeys = allowBuilding ? [...optionalDocumentKeys, ...buildingDocumentKeys] : optionalDocumentKeys
+    if (!keysWithOptional(value, documentKeys, optionalKeys)) return null
+    if (own(value, 'roof') && !isRoofDesign(value.roof)) return null
+    if (own(value, 'exterior') && !isExteriorDesign(value.exterior)) return null
+    if (own(value, 'upperFloors') && (!Array.isArray(value.upperFloors) || value.upperFloors.length >= MAX_LEVELS)) return null
     if (own(value, 'wallHeight') && !isWallHeight(value.wallHeight)) return null
     if (own(value, 'entrance') && !isEntrance(value.entrance)) return null
     if (own(value, 'wallItems') && (!Array.isArray(value.wallItems) || value.wallItems.length > MAX_WALL_ITEMS)) return null
@@ -759,8 +909,15 @@ export function parseShop(input: unknown): ShopDocument | null {
         result.wallItems.push({ ...item })
       }
     }
+    if (Array.isArray(value.upperFloors)) {
+      result.upperFloors = []
+      for (const level of value.upperFloors) {
+        const floor = parseFloor(level, false)
+        if (!floor) return null
+        result.upperFloors.push(floor)
+      }
+    }
+    if (isRoofDesign(value.roof)) result.roof = { ...value.roof }
+    if (isExteriorDesign(value.exterior)) result.exterior = { ...value.exterior }
     return result
-  } catch {
-    return null
-  }
 }

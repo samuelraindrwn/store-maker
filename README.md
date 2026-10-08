@@ -15,6 +15,22 @@ Buka **http://127.0.0.1:4330**. Di Windows, jalankan `run.bat` atau `./run.bat` 
 
 ## Membuat toko
 
+### Bangunan, lantai, dan eksterior
+
+Contoh baru memiliki **dua lantai**: toko, kamar mandi, dan tangga di lantai 1; rak gudang di lantai 2. Desain yang sudah tersimpan tetap dipertahankan. Gunakan **Reset ke toko contoh** untuk mencoba contoh baru (bisa diurungkan).
+
+- **Jumlah lantai** memilih 1 sampai **4 lantai**. Tombol **LT 1–4** memilih lantai yang sedang ditata. Interior menampilkan satu lantai terbuka agar barang mudah dipilih; bentuk lantai, dinding, perabot, dan aksesori masing-masing lantai dapat diubah sendiri.
+- Lantai baru mengikuti bentuk lantai sebelumnya. Tangga ditambahkan di lantai penghubung jika ada ruang; tangga tambahan dapat dipasang dari **Gudang & utilitas**. Katalog ini juga memuat rak gudang berisi kardus dan modul kamar mandi dengan toilet, wastafel, serta pancuran.
+- **Eksterior** memperlihatkan seluruh bangunan dari luar. Atur warna fasad dan bingkai, kanopi masuk, serta **Genteng** atau **Rooftop**. Atap genteng memiliki bidang miring dan barisan genteng; rooftop memiliki pagar pembatas dan pilihan taman dengan pergola.
+- **Lihat tokoku** menyembunyikan panel. Dalam mode Eksterior, foto yang diunduh menampilkan seluruh bangunan dan atap. Pilihan siang/malam tetap tersedia.
+- Mengurangi jumlah lantai menghapus lantai paling atas berikut isinya dalam satu langkah; **Urungkan** memulihkannya. Semua lantai, fasad, dan atap ikut autosave, undo/redo, ekspor, serta impor, termasuk ketika file disimpan saat sedang menata lantai atas.
+
+### Musik
+
+Menu **Atur musik dan volume** menyediakan musik cozy ceria (melodi original dengan bunyi petik dan marimba) serta **Piano & gerimis**. Musik ceria dipilih secara default; pilihan lagu dan volume diingat di browser. Musik mengikuti izin autoplay browser, dapat dijeda, dan berhenti saat tab disembunyikan. Seluruh musik disintesis secara lokal tanpa unduhan audio atau layanan luar.
+
+### Menata ruangan
+
 1. Pilih perabot di **Isi toko**, lalu klik petak lantai atau gunakan pilihan petak dan tombol **Letakkan di sini**.
 2. Di mode **Atur barang**, seret perabot langsung di scene untuk memindahkannya. Klik untuk mengganti warna, memutar 90°, menyalin, atau menghapusnya. Pada perabot pajangan, pilih isi melalui kelompok **Barang** atau **Makanan**, atau tekan **Kosong**.
 3. Pilih **Bangun → + Lantai**: klik atau sapu petak transparan untuk menambah lantai. Pilih **Hapus** untuk memotong bentuknya menjadi L, membentuk halaman, atau membuat bagian lain. Dinding mengikuti kontur petak; lantai di bawah furnitur dilindungi. Petak terakhir dapat dihapus jika tidak ada barang atau aksesori yang kehilangan tempat. Area gambar maksimum 24×24 petak; panduan di sekitar bentuk bertambah saat diperluas. Palet dinding/lantai ada di **Ruangan**.
@@ -36,7 +52,7 @@ Tombol **matahari/bulan** di deretan kontrol kanan bawah mengganti **siang / mod
 
 Pilihan siang/malam diingat pada browser ini sebagai preferensi tampilan terpisah dari dokumen desain, sehingga mengganti waktu tidak mengubah susunan toko atau riwayat undo. **Reset ke toko contoh** kembali ke siang; **Kosongkan semua** mempertahankan waktu yang sedang dipilih. **Lihat tokoku** dan **Unduh foto toko** mengikuti pencahayaan yang dipilih. Preferensi pengurangan animasi pada perangkat dihormati dengan pergantian langsung.
 
-Ada **22 perabot lantai**, termasuk tiga papan berdiri. Kategori **Pajangan** menambahkan **vitrin kaca, podium pajang, dan rak aksesori** di samping rak, meja, serta gantungan baju. Isi barang tersedia dalam sembilan jenis: **buku, keramik, tanaman, fashion, vinyl, sepatu, tas, skincare, dan mainan**. Bentuk produk tampil langsung pada rak atau meja.
+Ada **25 perabot lantai**, termasuk tangga, rak gudang, kamar mandi, dan tiga papan berdiri. Kategori **Pajangan** menambahkan **vitrin kaca, podium pajang, dan rak aksesori** di samping rak, meja, serta gantungan baju. Isi barang tersedia dalam sembilan jenis: **buku, keramik, tanaman, fashion, vinyl, sepatu, tas, skincare, dan mainan**. Bentuk produk tampil langsung pada rak atau meja.
 
 Kategori **Toko makanan** berisi **etalase makanan, kulkas minuman, bar kopi, meja persiapan, kompor & oven, bak cuci, meja makan dengan kursi, dan troli saji**, serta meja kasir dan bangku. Bar kopi sudah dilengkapi mesin kopi, penggiling, dan cangkir; meja persiapan, kompor, serta bak cuci memiliki detail perlengkapannya sendiri.
 

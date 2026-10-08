@@ -4,6 +4,27 @@ export default function FurnitureArt({ kind, color = '#bea78b' }: { kind: ItemKi
   const wood = '#c49767';
   return <svg viewBox="0 0 100 82" aria-hidden="true" className="furniture-art">
     <ellipse cx="52" cy="72" rx="31" ry="6" fill="#443346" opacity=".09" />
+    {kind === 'stairs' && <>
+      <path d="m18 66 16 8 51-23V13L68 6 18 56z" fill={color} />
+      <path d="m18 61 16 8 12-6v-9l11-5v-9l11-5v-9l12-5v-9L68 6 57 17v10l-11 5v9l-12 5v9z" fill="#e0c29a" />
+      <path d="m19 59 15 8 12-6m-12-7 12 7m0-16 11 6m-11-14 11 5m0-16 11 6m-11-14 11 5m0-14 12 6" fill="none" stroke="#b3946d" strokeWidth="2" />
+      <path d="M22 57V41l46-40v14M36 66V49l46-40v15m-35 32V40m12 9V29m11 12V21" fill="none" stroke="#7f736b" strokeWidth="2.5" strokeLinecap="round" />
+    </>}
+    {kind === 'warehouse-rack' && <>
+      <path d="m22 17 15 9 43-10m-58 1v45m15-36v47m43-57v44m-16-51v44" fill="none" stroke={color} strokeWidth="5" />
+      <path d="m22 33 42-10 16 9-43 11zm0 19 42-10 16 9-43 11z" fill="#c2c4b9" />
+      <path d="m24 33 13 8 41-10v4L37 46l-13-8zm0 19 13 8 41-10v4L37 65l-13-8z" fill={color} />
+      <path d="m31 21 13-3 8 5-14 4zm18-4 14-3 8 5-14 4z" fill="#e0bf94" />
+      <path d="m31 21 7 6v11l-7-5zm18-4 8 6v11l-8-5z" fill="#bc936c" /><path d="m38 27 14-4v11l-14 4zm19-4 14-4v11l-14 4z" fill="#cfaa7c" />
+      <path d="m36 48 13-4 8 5-14 4zm20-5 13-3 7 4-13 4z" fill="#e1c69d" /><path d="m36 48 7 5 14-4v9l-14 4-7-5zm20-5 7 5 13-4v9l-13 4-7-5z" fill="#cba77d" />
+      <path d="m42 31 6-2m14-2 5-1m-17 28 5-1m12-4 5-2" stroke="#f7ecd8" strokeWidth="3" />
+    </>}
+    {kind === 'bathroom' && <>
+      <path d="m17 26 39-14 28 15v38L45 78 17 62z" fill="#d8e0d5" /><path d="m17 26 28 17v35L17 62z" fill={color} /><path d="m45 43 39-16v38L45 78z" fill="#e7eadf" />
+      <path d="m21 49 22 13 38-14m-49 17 38-14m-37 2 23 14" fill="none" stroke="#c2cdbf" strokeWidth="1" />
+      <path d="m27 35 13-4 7 5v15l-13 4-7-5z" fill="#fbf8eb" /><ellipse cx="40" cy="53" rx="12" ry="7" fill="#fffbed" /><path d="M33 55v10l9 3 6-8v-8" fill="#f4f4e8" /><ellipse cx="40" cy="51" rx="11" ry="6" fill="#fffdf2" /><ellipse cx="40" cy="51" rx="6" ry="3" fill="#a9c6c3" />
+      <path d="m59 25 16-6v16l-16 6z" fill="#a2c7c6" stroke="#b49d80" strokeWidth="2" /><path d="m56 44 15-5 9 5-16 6z" fill="#fff9e9" /><path d="m56 44 8 6 16-6v13l-16 6-8-7z" fill="#b9a58b" /><ellipse cx="68" cy="44" rx="6" ry="3" fill="#b4cfca" /><path d="M69 41v-7h-4v4" fill="none" stroke="#869e9a" strokeWidth="2" />
+    </>}
     {kind === 'shelf' && <>
       <path d="M25 17 68 10 80 17 38 25Z" fill="#d7b590" /><path d="M25 17 38 25 38 71 25 62Z" fill="#ac8059" /><path d="M38 25 80 17 80 63 38 71Z" fill={color} />
       <path d="m41 28 35-6v14l-35 6zm0 20 35-6v15l-35 6z" fill="#745441" opacity=".55" />

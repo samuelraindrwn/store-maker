@@ -6,6 +6,7 @@ import { wallPanels } from './wallGeometry';
 import { buildWindowGeometry, buildWindowSpandrels } from './windowGeometry';
 import { buildStockProduct } from './stockObjects';
 import { buildCatalogItem } from './catalogObjects';
+import { buildBuildingFurniture } from './buildingFurniture';
 export { buildCity } from './city';
 
 const CREAM = '#f5ead6';
@@ -176,7 +177,9 @@ export function applyWallItemSize(group: THREE.Object3D, item: WallItem): void {
   group.scale.set(size.width / basis.width, size.height / basis.height, size.depth / basis.depth);
 }
 
-export function buildItem(item: ShopItem): THREE.Group {
+export function buildItem(item: ShopItem, floorRise = 2.99): THREE.Group {
+  const buildingFurniture = buildBuildingFurniture(item, floorRise);
+  if (buildingFurniture) return buildingFurniture;
   const catalogItem = buildCatalogItem(item, stockProduct);
   if (catalogItem) {
     catalogItem.name = `item:${item.id}`;
@@ -347,7 +350,7 @@ export function buildItem(item: ShopItem): THREE.Group {
   return g;
 }
 
-function textTexture(text: string, background: string, foreground: string, aspect = 4) {
+export function textTexture(text: string, background: string, foreground: string, aspect = 4) {
   if (typeof document === 'undefined') return null;
   const canvas = document.createElement('canvas');
   canvas.width = 1024;

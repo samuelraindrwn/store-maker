@@ -10,6 +10,9 @@ export type SceneHandle = {
 
 export type ShopCanvasProps = {
   shop: ShopDocument;
+  building?: ShopDocument;
+  activeLevel?: number;
+  exteriorOnly?: boolean;
   selectedId: string | null;
   placement: ShopItem | null;
   selectedWallId: string | null;
@@ -81,7 +84,7 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
 
   useEffect(() => {
     engine.current?.update(props);
-  }, [props.shop, props.selectedId, props.placement, props.selectedWallId, props.selectedDoor, props.resizeMode, props.wallPlacement, props.showGrid, props.showWalls, props.preview, props.editMode, props.buildTool, props.showCity, props.nightMode]);
+  }, [props.shop, props.building, props.activeLevel, props.exteriorOnly, props.selectedId, props.placement, props.selectedWallId, props.selectedDoor, props.resizeMode, props.wallPlacement, props.showGrid, props.showWalls, props.preview, props.editMode, props.buildTool, props.showCity, props.nightMode]);
 
   return (
     <div className="shop-canvas" style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: '#e8e3ed' }}>

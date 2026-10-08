@@ -22,7 +22,7 @@ const allProducts: ProductKind[] = ['books', 'ceramics', 'plants', 'fashion', 'v
 
 describe('retail and food catalog', () => {
   it('adds eleven distinct kinds with the requested dimensions, names, and initial stock', () => {
-    expect(new Set(CATALOG.map(entry => entry.kind)).size).toBe(22)
+    expect(new Set(CATALOG.map(entry => entry.kind)).size).toBe(25)
     for (const [kind, name, width, depth, stockable, stock] of additions) {
       const entry = CATALOG.find(entry => entry.kind === kind)!
       expect(entry).toMatchObject({ kind, name, width, depth, stockable })
@@ -42,7 +42,7 @@ describe('retail and food catalog', () => {
     expect(FOOD_ITEM_KINDS.every(kind => CATALOG.some(entry => entry.kind === kind))).toBe(true)
   })
 
-  it('keeps old defaults and the existing starter example unchanged', () => {
+  it('keeps old product defaults and starter furniture in the expanded example', () => {
     expect(createItem('shelf').stock).toBe('books')
     expect(createItem('table').stock).toBe('ceramics')
     expect(createItem('rack').stock).toBe('fashion')
@@ -52,7 +52,8 @@ describe('retail and food catalog', () => {
       ['welcome-rug', 'rug', 'none'], ['bookshelf', 'shelf', 'books'], ['ceramic-shelf', 'shelf', 'ceramics'],
       ['warm-lamp', 'lamp', 'none'], ['fashion-rack', 'rack', 'fashion'], ['display-table', 'table', 'ceramics'],
       ['checkout', 'counter', 'none'], ['little-seat', 'stool', 'none'], ['green-corner', 'plant', 'none'],
-      ['front-plant', 'plant', 'none'], ['sidewalk-chalkboard', 'chalkboard', 'none'],
+      ['front-plant', 'plant', 'none'], ['ground-stairs', 'stairs', 'none'], ['ground-bathroom', 'bathroom', 'none'],
+      ['sidewalk-chalkboard', 'chalkboard', 'none'],
     ])
     expect(parseShop(initial)).toEqual(initial)
     expect(createEmptyShop().items).toEqual([])
