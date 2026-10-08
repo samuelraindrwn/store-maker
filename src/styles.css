@@ -123,18 +123,26 @@
 .sign-style-options span{font-size:9px;font-weight:800;line-height:1.4}
 @media(max-width:760px){.sign-style-options .furniture-art{height:67px}.sign-style-options span{font-size:10px}}
 
-/* Editor tools stay in the page flow, leaving the shop unobstructed. */
+/* The editor tools live in the library sidebar, preserving the full canvas. */
 .scene-workspace{position:relative;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:650px}
 .scene-workspace>.scene-panel{flex:1;min-height:0}
-.scene-toolbar{display:flex;flex-shrink:0;justify-content:center;align-items:center;flex-wrap:wrap;gap:5px 8px;width:100%;padding:0;pointer-events:none}
+.scene-toolbar{display:flex;flex-shrink:0;align-items:center;flex-wrap:wrap;gap:10px;width:100%;min-width:0;padding:15px 0;border-bottom:1px solid var(--line);pointer-events:none}
 .scene-toolbar>.edit-mode-switch,.scene-toolbar>.build-tool-switch,.scene-toolbar>.placement-banner{pointer-events:auto}
-.scene-toolbar .edit-mode-switch{flex-shrink:0;background:#fffdf9;border:1px solid #e3dce9;box-shadow:0 3px 12px #41325008;backdrop-filter:none;padding:4px}
-.scene-toolbar .build-tool-switch{padding:4px;background:#fffdf9;box-shadow:none;backdrop-filter:none;max-width:100%;flex-wrap:wrap;justify-content:center;white-space:normal}
-.scene-toolbar .gesture-hint{justify-content:center;flex-basis:100%;min-width:0;white-space:normal;text-align:center;line-height:1.5;border:0;background:none;padding:0 4px;backdrop-filter:none}
+.scene-toolbar .edit-mode-switch{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;min-width:0;background:#fffdf9;border:1px solid #e3dce9;box-shadow:0 3px 12px #41325008;backdrop-filter:none;padding:4px}
+.scene-toolbar .edit-mode-switch button{min-width:0;min-height:40px;gap:4px;padding:8px 4px;font-size:10px;white-space:normal}
+.scene-toolbar button svg{flex-shrink:0}
+.scene-toolbar .build-tool-switch{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;min-width:0;padding:4px;background:#fffdf9;box-shadow:none;backdrop-filter:none;white-space:normal}
+.scene-toolbar .build-tool-switch button{min-width:0;min-height:44px;padding:7px 4px;gap:4px;font-size:10px;white-space:normal}
+.scene-toolbar .gesture-hint{align-items:flex-start;justify-content:flex-start;flex-basis:100%;min-width:0;white-space:normal;text-align:left;line-height:1.6;border:0;background:none;padding:0 2px;backdrop-filter:none}
 .scene-toolbar .gesture-hint .tiny-spark{flex-shrink:0}
-.scene-toolbar .placement-banner{position:static;transform:none;width:max-content;max-width:100%;padding:8px 10px;box-shadow:none;backdrop-filter:none}
-.scene-toolbar .placement-banner>div{flex:1;min-width:0}
-.scene-toolbar .placement-banner .icon-button{flex-shrink:0}
+.scene-toolbar .placement-banner{position:static;transform:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;min-width:0;padding:10px;box-shadow:none;backdrop-filter:none}
+.scene-toolbar .placement-banner .placement-indicator{display:none}
+.scene-toolbar .placement-banner>div{grid-column:1/-1;min-width:0;margin:0;overflow-wrap:anywhere}
+.scene-toolbar .placement-banner .icon-button{width:100%;height:32px}
+.scene-toolbar .placement-banner .icon-button:only-of-type{grid-column:2}
+.scene-controls{flex-wrap:wrap;gap:8px}
+.camera-group,.view-controls{flex-shrink:0}
+.view-controls{margin-left:auto}
 .is-preview .scene-workspace>.scene-panel{min-height:650px}
 @media(max-width:760px){
   .scene-workspace{order:1;gap:10px;min-height:0}
@@ -146,6 +154,7 @@
   .scene-toolbar .gesture-hint{font-size:10px;padding:0 3px}
   .is-preview .scene-workspace>.scene-panel{min-height:620px}
 }
+@media(max-width:390px){.interaction-hud{bottom:140px}}
 
 /* Building navigation stays outside the scene so every floor is reachable on mobile. */
 .building-navigation{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:0 0 17px;padding:12px 15px;border:1px solid #e6deeb;background:#fffdf9;border-radius:15px}

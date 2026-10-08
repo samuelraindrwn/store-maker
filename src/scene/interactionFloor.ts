@@ -119,9 +119,9 @@ export class FloorPainter {
     vertices.needsUpdate = true;
   }
 
-  updatePreview(shop: ShopDocument, showWalls: boolean) {
+  updatePreview(shop: ShopDocument, showWalls: boolean, showAllWalls = false) {
     const cells = getFloorCells(shop);
-    const nextKey = JSON.stringify([shop.width, shop.depth, cells, shop.floorColor, getWallHeight(shop), showWalls]);
+    const nextKey = JSON.stringify([shop.width, shop.depth, cells, shop.floorColor, getWallHeight(shop), showWalls, showAllWalls]);
     if (nextKey === this.paintKey) return;
     this.paintKey = nextKey;
     const floorColor = new THREE.Color(shop.floorColor);
@@ -143,7 +143,7 @@ export class FloorPainter {
     };
     floorOutline(cells).forEach(({ x1, z1, x2, z2, side }) => {
       line(x1, 0.07, z1, x2, 0.07, z2);
-      if (showWalls && (side === 'back' || side === 'left')) {
+      if (showWalls && (showAllWalls || side === 'back' || side === 'left')) {
         const height = getWallHeight(shop);
         line(x1, height, z1, x2, height, z2);
         line(x1, 0.07, z1, x1, height, z1);

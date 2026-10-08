@@ -150,16 +150,20 @@ test('all three standing sign variants can be placed and survive export import a
   await page.evaluate(() => scrollTo(0, 0));
   const toolbar = page.getByTestId('scene-toolbar');
   const pill = toolbar.locator('.edit-mode-switch');
+  await page.locator('.library-panel').evaluate(element => { element.scrollTop = 0; });
   expect(await toolbar.evaluate(element => element.closest('[data-testid="scene"]') === null)).toBe(true);
+  expect(await toolbar.evaluate(element => element.parentElement?.classList.contains('library-panel'))).toBe(true);
   const pillBox = (await pill.boundingBox())!, sceneBox = (await page.getByTestId('scene').boundingBox())!;
+  const library = (await page.locator('.library-panel').boundingBox())!;
+  const tabs = (await page.locator('.panel-tabs').boundingBox())!;
   const actions = (await page.locator('.workspace-actions').boundingBox())!;
-  expect(pillBox.y + pillBox.height).toBeLessThanOrEqual(sceneBox.y);
-  expect(Math.abs(pillBox.x + pillBox.width / 2 - sceneBox.x - sceneBox.width / 2)).toBeLessThan(1);
+  expect(pillBox.y).toBeGreaterThanOrEqual(tabs.y + tabs.height);
+  expect(pillBox.x).toBeGreaterThanOrEqual(library.x);
+  expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(library.x + library.width);
   expect(pillBox.x + pillBox.width <= actions.x || actions.x + actions.width <= pillBox.x
     || pillBox.y + pillBox.height <= actions.y || actions.y + actions.height <= pillBox.y).toBe(true);
-  expect(pillBox.width).toBeLessThan(300);
   if (testInfo.project.name === 'chromium') {
-    const library = (await page.locator('.library-panel').boundingBox())!;
+    expect(pillBox.x + pillBox.width).toBeLessThan(sceneBox.x);
     expect(Math.abs(sceneBox.y - library.y)).toBeLessThan(1);
     expect(sceneBox.height).toBeGreaterThanOrEqual(650);
   }

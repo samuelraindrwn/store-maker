@@ -79,6 +79,8 @@ Aksesori harus muat pada bidang dinding dan tidak bertumpuk dengan aksesori lain
 
 Geser area kosong untuk memutar kamera, dan gulir untuk zoom. Di ponsel, tarik objek/pegangan dengan satu jari, geser area kosong untuk memutar, dan cubit dengan dua jari untuk zoom. Tombol **3D**, **Atas**, **Depan**, reset kamera, petak, dan dinding membantu melihat susunan dari berbagai sisi.
 
+Kontrol **Atur barang / Bangun**, alat bangun, dan petunjuk berada di panel perabot agar kanvas tetap penuh. Tombol **Tampilkan dinding** (ikon lapisan) menyembunyikan atau menampilkan tembok. Tombol **Tampilkan seluruh tembok** (ikon bata) di sebelahnya menampilkan keempat sisi lengkap dengan bukaan pintu dan jendela; klik lagi untuk kembali ke tampilan sebagian. Kedua tombol hanya mengatur tampilan, tanpa mengubah desain atau riwayat undo.
+
 Sapuan petak dan tarikan menampilkan pratinjau langsung, lalu menyimpan satu perubahan saat dilepas. **Escape**, pembatalan pointer, atau penambahan jari kedua membatalkan tarikan. Penempatan yang bertabrakan atau melewati petak kosong dikembalikan; satu kali undo membatalkan satu tarikan utuh. Kamera tidak direset ketika bentuk lantai berubah.
 
 | Pintasan | Aksi |

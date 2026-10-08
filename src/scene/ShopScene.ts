@@ -31,6 +31,7 @@ export type SceneState = {
   wallPlacementMount?: Pick<WallItem, 'wall' | 'line'> | null;
   showGrid: boolean;
   showWalls: boolean;
+  showAllWalls?: boolean;
   preview: boolean;
   editMode?: 'arrange' | 'build';
   buildTool?: 'add' | 'erase' | 'walls' | 'partition';
@@ -128,7 +129,6 @@ export class ShopScene {
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private state: SceneState | null = null;
   private room: THREE.Group | null = null;
-  private walls: THREE.Group | null = null;
   private builtRoom: ReturnType<typeof buildRoom> | null = null;
   private city: THREE.Group | null = null;
   private cityKey = '';
@@ -263,7 +263,7 @@ export class ShopScene {
     // Exterior camera navigation never claims furniture/build gestures.
     if (next.exteriorOnly) next = { ...next, preview: true, placement: null, wallPlacement: null, selectedId: null, selectedWallId: null, selectedDoor: false, resizeMode: false };
     if (next.rooftopOnly) next = { ...next, editMode: 'arrange', wallPlacement: null, selectedWallId: null, selectedDoor: false, selectedPartitionId: null };
-    if (this.gesture && (next.shop !== this.state?.shop || next.editMode !== this.state?.editMode || next.buildTool !== this.state?.buildTool || next.preview !== this.state?.preview || next.placement !== this.state?.placement || next.wallPlacement !== this.state?.wallPlacement || next.showWalls !== this.state?.showWalls || next.resizeMode !== this.state?.resizeMode || next.selectedId !== this.state?.selectedId || next.selectedWallId !== this.state?.selectedWallId)) this.cancelGesture();
+    if (this.gesture && (next.shop !== this.state?.shop || next.editMode !== this.state?.editMode || next.buildTool !== this.state?.buildTool || next.preview !== this.state?.preview || next.placement !== this.state?.placement || next.wallPlacement !== this.state?.wallPlacement || next.showWalls !== this.state?.showWalls || next.showAllWalls !== this.state?.showAllWalls || next.resizeMode !== this.state?.resizeMode || next.selectedId !== this.state?.selectedId || next.selectedWallId !== this.state?.selectedWallId)) this.cancelGesture();
     this.resizeHover = null;
     this.itemSupportCache.clear();
     this.state = next;
@@ -293,7 +293,6 @@ export class ShopScene {
       const built = buildRoom(shop, { slabDepth: activeLevel > 0 ? LEVEL_SLAB : undefined, floorOpenings: stairOpenings, hasEntrance: activeLevel === 0 });
       this.builtRoom = built;
       this.room = built.group;
-      this.walls = built.walls;
       built.doorPivot.rotation.y = previousDoorAngle ?? (getEntrance(shop).open ? -Math.PI / 2 : 0);
       this.scene.add(this.room);
       this.roomKey = nextRoomKey;
@@ -389,10 +388,7 @@ export class ShopScene {
       this.setView(this.view);
       this.renderer.shadowMap.needsUpdate = true;
     }
-    if (this.walls && this.walls.visible !== next.showWalls) {
-      this.walls.visible = next.showWalls;
-      this.renderer.shadowMap.needsUpdate = true;
-    }
+    this.updateBoundaryVisibility();
     if (this.grid) this.grid.visible = next.showGrid && !next.preview;
     if (next.preview && this.hover) this.setHover(null);
     this.updateSelection();
@@ -409,6 +405,23 @@ export class ShopScene {
     this.updateLightingMetadata();
     this.projectionDirty = true;
     this.renderer.domElement.style.cursor = next.preview ? 'grab' : next.placement || next.wallPlacement ? 'crosshair' : 'grab';
+  }
+
+  private updateBoundaryVisibility() {
+    if (!this.state || !this.builtRoom) return;
+    const { walls, backWall, leftWall, frontWall, rightWall } = this.builtRoom;
+    const painting = this.gesture?.kind === 'paint';
+    const visible = [
+      [walls, this.state.showWalls],
+      [backWall, !painting], [leftWall, !painting],
+      [frontWall, !painting && !!this.state.showAllWalls],
+      [rightWall, !painting && !!this.state.showAllWalls],
+    ] as const;
+    for (const [object, show] of visible) {
+      if (object.visible === show) continue;
+      object.visible = show;
+      this.renderer.shadowMap.needsUpdate = true;
+    }
   }
 
   private positionItem(group: THREE.Group, item: ShopItem) {
@@ -846,7 +859,7 @@ export class ShopScene {
     this.painter.preview.visible = this.gesture?.kind === 'paint';
     if (active) {
       this.painter.updateWork(draft, this.state.buildTool === 'erase');
-      if (this.painter.preview.visible) this.painter.updatePreview(draft, this.state.showWalls);
+      if (this.painter.preview.visible) this.painter.updatePreview(draft, this.state.showWalls, this.state.showAllWalls);
       this.painter.hoverCell(draft, this.hover, this.state.buildTool === 'erase');
     }
     this.renderer.domElement.dataset.buildTool = this.state.buildTool ?? 'add';
@@ -871,8 +884,7 @@ export class ShopScene {
     this.updatePainter();
     if (this.builtRoom) {
       this.builtRoom.floor.visible = false;
-      this.builtRoom.backWall.visible = false;
-      this.builtRoom.leftWall.visible = false;
+      this.updateBoundaryVisibility();
       this.builtRoom.entrance.visible = this.builtRoom.hasFloor && getFloorCells(drag.draft).length > 0 && (this.state!.activeLevel ?? 0) === 0;
     }
     if (this.grid) this.grid.visible = false;
@@ -1130,8 +1142,7 @@ export class ShopScene {
     this.builtRoom?.previewDimensions(base.width, base.depth, base.wallHeight, base.entrancePosition);
     if (this.builtRoom) {
       this.builtRoom.floor.visible = true;
-      this.builtRoom.backWall.visible = true;
-      this.builtRoom.leftWall.visible = true;
+      this.updateBoundaryVisibility();
       this.builtRoom.entrance.visible = this.builtRoom.hasFloor && (this.state.activeLevel ?? 0) === 0;
     }
     this.items.children.forEach((object) => {
@@ -1702,6 +1713,19 @@ export class ShopScene {
     data.levelCount = String(getLevelCount(this.state.building ?? this.state.shop));
     data.exteriorOnly = String(!!this.state.exteriorOnly);
     data.rooftopOnly = String(!!this.state.rooftopOnly);
+    data.showAllWalls = String(!!this.state.showAllWalls);
+    const boundaryVisible = (wall?: THREE.Group) => {
+      if (!wall?.children.length) return false;
+      let object: THREE.Object3D | null = wall;
+      while (object) { if (!object.visible) return false; object = object.parent; }
+      return true;
+    };
+    data.wallVisibility = JSON.stringify({
+      back: boundaryVisible(this.builtRoom?.backWall),
+      left: boundaryVisible(this.builtRoom?.leftWall),
+      front: boundaryVisible(this.builtRoom?.frontWall),
+      right: boundaryVisible(this.builtRoom?.rightWall),
+    });
     const building = this.state.building ?? this.state.shop;
     const roof = getRooftopDocument(building);
     const roofObjects = this.state.exteriorOnly ? this.building?.getObjectByName('rooftop-terrace')?.children
