@@ -10,7 +10,8 @@ const SOFTWARE_GL = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 // Trace/screenshot hooks evaluate with userGesture:true, which would themselves
 // unlock this policy. Explicit screenshots in the allowed case remain enabled.
 test.use({ trace: 'off', screenshot: 'off', launchOptions: { args: [...SOFTWARE_GL, '--enable-automation', '--autoplay-policy=document-user-activation-required', '--disable-blink-features=AutoplayIgnoresWebAudio', '--disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies'] } });
-type AudioProbe = { contexts: AudioContext[]; meters: AnalyserNode[] };
+type SourceProbe = { source: AudioBufferSourceNode; starts: number; stops: number };
+type AudioProbe = { contexts: AudioContext[]; meters: AnalyserNode[]; sources: SourceProbe[]; retainedLoop?: SourceProbe };
 type ProbeWindow = Window & { __cozyAudioProbe: AudioProbe };
 const button = (page: Page, name: string) => page.getByRole('button', { name, exact: true });
 const canvasFor = (page: Page) => page.getByTestId('scene').locator('canvas[data-renderer="webgl"]');
@@ -64,13 +65,22 @@ async function openApp(page: Page, info: TestInfo) {
   // parallel analyser branch makes the existing signal measurable, not audible
   // twice, and never starts or replaces the app's audio.
   await page.addInitScript(() => {
-    const probe: AudioProbe = { contexts: [], meters: [] };
+    const probe: AudioProbe = { contexts: [], meters: [], sources: [] };
     (window as unknown as ProbeWindow).__cozyAudioProbe = probe;
     const NativeAudioContext = window.AudioContext;
     window.AudioContext = class ObservedAudioContext extends NativeAudioContext {
       constructor(options?: AudioContextOptions) {
         super(options);
         probe.contexts.push(this);
+      }
+      createBufferSource() {
+        const source = super.createBufferSource();
+        const observed = { source, starts: 0, stops: 0 };
+        probe.sources.push(observed);
+        const start = source.start.bind(source), stop = source.stop.bind(source);
+        source.start = (...args: [number?, number?, number?]) => { observed.starts++; start(...args); };
+        source.stop = (...args: [number?]) => { observed.stops++; stop(...args); };
+        return source;
       }
     };
     const originalConnect = AudioNode.prototype.connect;
@@ -236,6 +246,42 @@ test('music autoplays with real audio, preserves volume and editor behavior, and
     await browser.close();
   }
 });
+});
+
+test('the same native music loop continues through exterior, interior, and floor changes', async ({ page }, info) => {
+  test.setTimeout(90_000);
+  const errors = await openApp(page, info);
+  await outsidePointer(page);
+  await expectPlaying(page);
+  await expect.poll(() => withoutGesture(page, () => {
+    const probe = (window as unknown as ProbeWindow).__cozyAudioProbe;
+    const active = probe.sources.find(({ source, starts, stops }) => source.loop && source.buffer?.numberOfChannels === 2 && starts === 1 && stops === 0);
+    probe.retainedLoop = active;
+    return Boolean(active);
+  })).toBe(true);
+  const original = await saved(page);
+  const start = await withoutGesture(page, () => (window as unknown as ProbeWindow).__cozyAudioProbe.retainedLoop!.source.context.currentTime);
+  for (const name of ['Eksterior', 'Interior', 'Edit lantai 2', 'Eksterior', 'Edit lantai 1']) {
+    await button(page, name).click();
+    await expect(page.locator('.shop-canvas')).toHaveAttribute('aria-busy', 'false');
+    await expect(canvasFor(page)).toHaveAttribute('data-ready', 'true');
+    await expect(button(page, name)).toHaveAttribute('aria-pressed', 'true');
+    await expectPlaying(page);
+    const state = await withoutGesture(page, () => {
+      const probe = (window as unknown as ProbeWindow).__cozyAudioProbe, retained = probe.retainedLoop!;
+      return {
+        starts: retained.starts, stops: retained.stops,
+        contexts: probe.contexts.filter(context => context.state !== 'closed').length,
+        running: retained.source.context.state,
+        activeLoops: probe.sources.filter(({ source, starts, stops }) => source.loop && source.buffer?.numberOfChannels === 2 && starts === 1 && stops === 0).length,
+        time: retained.source.context.currentTime,
+      };
+    });
+    expect(state).toMatchObject({ starts: 1, stops: 0, contexts: 1, running: 'running', activeLoops: 1 });
+    expect(state.time).toBeGreaterThan(start);
+  }
+  expect(await saved(page)).toEqual(original);
+  expect(errors).toEqual([]);
 });
 
 test.describe('blocked autoplay', () => {

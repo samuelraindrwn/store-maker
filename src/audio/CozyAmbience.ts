@@ -1,4 +1,5 @@
 type Voice = { sources: OscillatorNode[]; nodes: AudioNode[]; envelope: GainNode; released: boolean };
+type Loop = { source: AudioBufferSourceNode; envelope: GainNode; nodes: AudioNode[] };
 type Note = { beat: number; midi: number; length: number; level: number; bass?: boolean };
 export type AmbienceTrack = 'cheerful' | 'calm';
 type Graph = {
@@ -12,7 +13,8 @@ type Graph = {
 };
 
 const SCORE_BEATS = 32;
-const LOOK_AHEAD = 0.18;
+// Cover initial scene work while the audio thread prepares the permanent loop.
+const LOOK_AHEAD = 1.5;
 const FADE_OUT = 0.18;
 const MAX_VOICES = 36;
 
@@ -84,6 +86,47 @@ function ramp(parameter: AudioParam, value: number, time: number, duration: numb
   parameter.linearRampToValueAtTime(value, time + duration);
 }
 
+function tone(context: BaseAudioContext, note: Note, when: number, track: AmbienceTrack, destination: AudioNode): Voice {
+  const cheerful = track === 'cheerful';
+  const envelope = context.createGain();
+  const fundamental = context.createOscillator();
+  const warmth = context.createOscillator();
+  const overtone = context.createGain(); overtone.gain.value = note.bass ? 0.12 : cheerful ? 0.3 : 0.22;
+  const frequency = 440 * 2 ** ((note.midi - 69) / 12);
+  fundamental.type = 'sine'; fundamental.frequency.value = frequency;
+  warmth.type = cheerful && !note.bass ? 'sine' : 'triangle';
+  warmth.frequency.value = frequency * (cheerful && !note.bass ? 3 : 1);
+  warmth.detune.value = note.bass || cheerful ? 0 : 1.7;
+  fundamental.connect(envelope); warmth.connect(overtone); overtone.connect(envelope);
+  envelope.connect(destination);
+  const end = when + note.length * TRACKS[track].beat;
+  envelope.gain.setValueAtTime(0, when);
+  envelope.gain.linearRampToValueAtTime(note.level, when + (cheerful ? 0.008 : note.bass ? 0.065 : 0.028));
+  envelope.gain.exponentialRampToValueAtTime(note.level * (cheerful ? 0.3 : 0.24), when + (cheerful ? 0.12 : 0.65));
+  envelope.gain.exponentialRampToValueAtTime(0.0001, end - 0.08);
+  envelope.gain.linearRampToValueAtTime(0, end);
+  for (const source of [fundamental, warmth]) { source.start(when); source.stop(end + 0.025); }
+  return { sources: [fundamental, warmth], nodes: [fundamental, warmth, overtone, envelope], envelope, released: false };
+}
+
+/** Render separate instrument stems off the UI thread, including the previous cycle's tails. */
+async function renderLoop(track: AmbienceTrack, sampleRate: number): Promise<AudioBuffer | null> {
+  const Constructor = globalThis.OfflineAudioContext ?? (globalThis as typeof globalThis & { webkitOfflineAudioContext?: typeof OfflineAudioContext }).webkitOfflineAudioContext;
+  if (!Constructor) return null;
+  const frames = Math.round(SCORE_BEATS * TRACKS[track].beat * sampleRate);
+  const offline = new Constructor(2, frames * 2, sampleRate);
+  const stems = offline.createChannelMerger(2);
+  const piano = offline.createGain(), bass = offline.createGain();
+  piano.connect(stems, 0, 0); bass.connect(stems, 0, 1); stems.connect(offline.destination);
+  for (let cycle = 0; cycle < 2; cycle++) for (const note of TRACKS[track].score) {
+    tone(offline, note, cycle * frames / sampleRate + note.beat * TRACKS[track].beat, track, note.bass ? bass : piano);
+  }
+  const rendered = await offline.startRendering();
+  const buffer = offline.createBuffer(2, frames, sampleRate);
+  for (let channel = 0; channel < 2; channel++) buffer.getChannelData(channel).set(rendered.getChannelData(channel).subarray(frames));
+  return buffer;
+}
+
 /** Original synthesized music; all resources belong to this one disposable player. */
 export class CozyAmbience {
   private context: AudioContext | null = null;
@@ -97,6 +140,9 @@ export class CozyAmbience {
   private scheduler: ReturnType<typeof setInterval> | null = null;
   private suspendTimer: ReturnType<typeof setTimeout> | null = null;
   private voices = new Set<Voice>();
+  private loops = new Set<Loop>();
+  private activeLoop: Loop | null = null;
+  private renderedTracks = new Map<AmbienceTrack, Promise<AudioBuffer | null>>();
   private scoreStart = 0;
   private scoreLoop = 0;
   private eventIndex = 0;
@@ -115,13 +161,14 @@ export class CozyAmbience {
         if (!this.disposed && !this.wanted && this.suspendTimer === null && context.state === 'running') this.suspend(context);
         return;
       }
-      if (this.scheduler !== null) return;
+      if (this.scheduler !== null || this.activeLoop) return;
       this.scoreStart = context.currentTime + 0.045;
       this.scoreLoop = 0;
       this.eventIndex = 0;
       ramp(this.graph!.master.gain, this.volume, context.currentTime, 0.22);
       this.schedule();
       this.scheduler = setInterval(() => this.schedule(), 40);
+      this.prepareLoop();
     } catch (error) {
       if (generation === this.generation) this.wanted = false;
       throw error;
@@ -138,6 +185,7 @@ export class CozyAmbience {
     const now = context.currentTime;
     if (this.graph) ramp(this.graph.master.gain, 0, now, FADE_OUT);
     this.releaseVoices(now, FADE_OUT);
+    this.releaseLoops(now, FADE_OUT);
     this.suspendTimer = setTimeout(() => {
       this.suspendTimer = null;
       if (this.disposed || this.wanted || generation !== this.generation || context.state === 'closed') return;
@@ -148,7 +196,7 @@ export class CozyAmbience {
   setVolume(value: number): void {
     if (!Number.isFinite(value) || this.disposed) return;
     this.volume = Math.max(0, Math.min(1, value));
-    if (this.wanted && this.scheduler !== null && this.context && this.graph) {
+    if (this.wanted && (this.scheduler !== null || this.activeLoop) && this.context && this.graph) {
       ramp(this.graph.master.gain, this.volume, this.context.currentTime, 0.12);
     }
   }
@@ -165,10 +213,16 @@ export class CozyAmbience {
     ramp(this.graph.piano.frequency, track.filter, now, 0.18);
     ramp(this.graph.wet.gain, track.reverb, now, 0.25);
     this.releaseVoices(now, 0.12);
+    const playing = this.scheduler !== null || this.activeLoop !== null;
+    this.releaseLoops(now, 0.12);
     this.scoreStart = now + 0.14;
     this.scoreLoop = 0;
     this.eventIndex = 0;
-    if (this.scheduler !== null) this.schedule();
+    if (playing) {
+      this.schedule();
+      this.scheduler ??= setInterval(() => this.schedule(), 40);
+      this.prepareLoop();
+    }
   }
 
   dispose(): void {
@@ -180,6 +234,8 @@ export class CozyAmbience {
     this.cancelSuspension();
     const context = this.context;
     for (const voice of [...this.voices]) this.removeVoice(voice, true);
+    for (const loop of [...this.loops]) this.removeLoop(loop, true);
+    this.renderedTracks.clear();
     if (this.graph) {
       this.graph.rain.stop();
       for (const node of this.graph.nodes) node.disconnect();
@@ -288,32 +344,55 @@ export class CozyAmbience {
   }
 
   private note(note: Note, when: number) {
-    const context = this.context!;
-    const cheerful = this.track === 'cheerful';
-    const envelope = context.createGain();
-    const fundamental = context.createOscillator();
-    const warmth = context.createOscillator();
-    const overtone = context.createGain(); overtone.gain.value = note.bass ? 0.12 : cheerful ? 0.3 : 0.22;
-    const frequency = 440 * 2 ** ((note.midi - 69) / 12);
-    fundamental.type = 'sine'; fundamental.frequency.value = frequency;
-    warmth.type = cheerful && !note.bass ? 'sine' : 'triangle';
-    warmth.frequency.value = frequency * (cheerful && !note.bass ? 3 : 1);
-    warmth.detune.value = note.bass || cheerful ? 0 : 1.7;
-    fundamental.connect(envelope); warmth.connect(overtone); overtone.connect(envelope);
-    envelope.connect(note.bass ? this.graph!.bass : this.graph!.piano);
-    const end = when + note.length * TRACKS[this.track].beat;
-    envelope.gain.setValueAtTime(0, when);
-    envelope.gain.linearRampToValueAtTime(note.level, when + (cheerful ? 0.008 : note.bass ? 0.065 : 0.028));
-    envelope.gain.exponentialRampToValueAtTime(note.level * (cheerful ? 0.3 : 0.24), when + (cheerful ? 0.12 : 0.65));
-    envelope.gain.exponentialRampToValueAtTime(0.0001, end - 0.08);
-    envelope.gain.linearRampToValueAtTime(0, end);
-    const voice: Voice = { sources: [fundamental, warmth], nodes: [fundamental, warmth, overtone, envelope], envelope, released: false };
+    const voice = tone(this.context!, note, when, this.track, note.bass ? this.graph!.bass : this.graph!.piano);
     this.voices.add(voice);
     let ended = 0;
     for (const source of voice.sources) {
       source.onended = () => { if (++ended === voice.sources.length) this.removeVoice(voice); };
-      source.start(when); source.stop(end + 0.025);
     }
+  }
+
+  private prepareLoop() {
+    const context = this.context!, track = this.track;
+    let rendering = this.renderedTracks.get(track);
+    if (!rendering) {
+      rendering = renderLoop(track, context.sampleRate).catch(() => null);
+      this.renderedTracks.set(track, rendering);
+    }
+    void rendering.then(buffer => {
+      if (!buffer || this.disposed || !this.wanted || this.context !== context || this.track !== track || this.activeLoop || this.scheduler === null) return;
+      const now = context.currentTime, when = Math.max(now + 0.035, this.scoreStart);
+      const source = context.createBufferSource(), envelope = context.createGain(), splitter = context.createChannelSplitter(2);
+      source.buffer = buffer; source.loop = true;
+      source.connect(envelope); envelope.connect(splitter);
+      splitter.connect(this.graph!.piano, 0); splitter.connect(this.graph!.bass, 1);
+      // Continue at the current musical position; switching views never restarts a track.
+      const offset = ((when - this.scoreStart) % buffer.duration + buffer.duration) % buffer.duration;
+      envelope.gain.setValueAtTime(0, when);
+      envelope.gain.linearRampToValueAtTime(1, when + 0.045);
+      const loop = { source, envelope, nodes: [source, envelope, splitter] };
+      this.loops.add(loop); this.activeLoop = loop;
+      source.onended = () => this.removeLoop(loop);
+      source.start(when, offset);
+      this.releaseVoices(when, 0.045);
+      this.cancelScheduler();
+    });
+  }
+
+  private releaseLoops(now: number, duration: number) {
+    const loop = this.activeLoop;
+    if (!loop) return;
+    this.activeLoop = null;
+    ramp(loop.envelope.gain, 0, now, duration);
+    loop.source.stop(now + duration + 0.025);
+  }
+
+  private removeLoop(loop: Loop, stop = false) {
+    if (!this.loops.delete(loop)) return;
+    if (this.activeLoop === loop) this.activeLoop = null;
+    loop.source.onended = null;
+    if (stop) loop.source.stop();
+    for (const node of loop.nodes) node.disconnect();
   }
 
   private releaseVoices(now: number, duration: number) {

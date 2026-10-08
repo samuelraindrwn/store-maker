@@ -9,8 +9,9 @@ import { intersectWall, wallFrame } from './interactionWalls';
 import { ObjectResizeTools, resizeFloorEdge, resizeFloorToTile, resizeWallEdge, resizeWallToTile, type ResizeEdge } from './interactionObjectResize';
 import { getItemSupport } from './itemSupport';
 import { NightLighting } from './lighting';
-import { buildBuilding, buildStairLandings, getBuildingBounds, LEVEL_SLAB } from './buildingObjects';
-import { getLevelCount, getRoof } from '../model';
+import { buildBuilding, buildInteriorContext, buildStairLandings, getBuildingBounds, getLevelBaseY, LEVEL_SLAB } from './buildingObjects';
+import { getStairOpenings } from './stairGeometry';
+import { getLevelCount, getLevelDocument, getRoof } from '../model';
 
 export type Cell = { x: number; z: number };
 export type CameraView = 'orbit' | 'top' | 'front';
@@ -45,6 +46,7 @@ export type SceneCallbacks = {
   onChange: (doc: ShopDocument, label?: string) => void;
   onInteraction?: (text: string | null) => void;
   onError: (message: string) => void;
+  onFrame?: () => void;
 };
 
 type Gesture = {
@@ -128,6 +130,8 @@ export class ShopScene {
   private buildingKey = '';
   private landings: THREE.Group | null = null;
   private landingKey = '';
+  private lowerFloors: THREE.Group | null = null;
+  private lowerFloorKey = '';
   private readonly handles = makeBuildHandles();
   private readonly painter = new FloorPainter();
   private readonly objectResize = new ObjectResizeTools();
@@ -242,6 +246,7 @@ export class ShopScene {
     const levelChanged = next.activeLevel !== this.state?.activeLevel;
     const buildingDoc = next.building ?? next.shop;
     const previousBuildingBounds = this.state ? JSON.stringify(this.buildingMetrics()) : '';
+    const previousFloorY = this.activeFloorY();
     if (this.gesture && (exteriorChanged || levelChanged || getLevelCount(buildingDoc) !== getLevelCount(this.state!.building ?? this.state!.shop))) this.cancelGesture();
     // Exterior camera navigation never claims furniture/build gestures.
     if (next.exteriorOnly) next = { ...next, preview: true, placement: null, wallPlacement: null, selectedId: null, selectedWallId: null, selectedDoor: false, resizeMode: false };
@@ -251,13 +256,19 @@ export class ShopScene {
     this.state = next;
     this.renderDirty = true;
     const { shop } = next;
+    const activeLevel = next.activeLevel ?? 0;
+    // Keep editor gestures in floor-local coordinates. The neighbourhood and
+    // lower levels move down by the selected floor's real building elevation.
+    const floorY = next.exteriorOnly ? 0 : getLevelBaseY(buildingDoc, activeLevel);
+    this.ground.position.y = -0.401 - floorY;
+    const stairOpenings = getStairOpenings(buildingDoc, activeLevel);
     let lightingContentChanged = exteriorChanged;
     this.lighting.setMode(next.nightMode ?? false, firstShop || this.reducedMotion.matches);
-    const nextRoomKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, this.windowKey(getWallItems(shop)), getWallHeight(shop), getEntrance(shop).position, getEntranceRotation(shop), getExterior(shop).awning, shop.floorColor, shop.wallColor, shop.name]);
+    const nextRoomKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, this.windowKey(getWallItems(shop)), getWallHeight(shop), getEntrance(shop).position, getEntranceRotation(shop), getExterior(shop).awning, shop.floorColor, shop.wallColor, shop.name, activeLevel, stairOpenings]);
     if (nextRoomKey !== this.roomKey) {
       const previousDoorAngle = this.builtRoom?.doorPivot.rotation.y;
       if (this.room) disposeGroup(this.room);
-      const built = buildRoom(shop);
+      const built = buildRoom(shop, { slabDepth: activeLevel > 0 ? LEVEL_SLAB : undefined, floorOpenings: stairOpenings });
       this.builtRoom = built;
       this.room = built.group;
       this.walls = built.walls;
@@ -280,7 +291,7 @@ export class ShopScene {
       delete this.renderer.domElement.dataset.doorAngle;
       delete this.renderer.domElement.dataset.doorRotation;
     }
-    const cityShop = next.exteriorOnly ? buildingDoc : shop;
+    const cityShop = buildingDoc;
     const nextCityKey = JSON.stringify([cityShop.width, cityShop.depth, cityShop.floorCells]);
     if (this.cityKey !== nextCityKey) {
       lightingContentChanged = true;
@@ -289,7 +300,7 @@ export class ShopScene {
       this.scene.add(this.city);
       this.cityKey = nextCityKey;
     }
-    if (this.city) this.city.visible = next.showCity ?? true;
+    if (this.city) { this.city.visible = next.showCity ?? true; this.city.position.y = -floorY; }
     const nextItemKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, getWallHeight(shop), next.showCity, next.showWalls, getEntrance(shop).position, getEntranceRotation(shop), shop.items]);
     if (nextItemKey !== this.itemKey) {
       lightingContentChanged = true;
@@ -325,20 +336,33 @@ export class ShopScene {
       lightingContentChanged = true;
       this.renderer.shadowMap.needsUpdate = true;
     }
-    const nextLandingKey = JSON.stringify([next.activeLevel ?? 0, buildingDoc]);
+    const nextLandingKey = JSON.stringify([activeLevel, shop.width, shop.depth, shop.floorCells, stairOpenings]);
     if (this.landingKey !== nextLandingKey) {
       if (this.landings) disposeGroup(this.landings);
       this.landings = buildStairLandings(buildingDoc, next.activeLevel ?? 0);
       this.scene.add(this.landings);
       this.landingKey = nextLandingKey;
     }
+    const lowerDocuments = Array.from({ length: activeLevel }, (_, index) => {
+      const { upperFloors: _upper, ...floor } = getLevelDocument(buildingDoc, index);
+      return floor;
+    });
+    const nextLowerFloorKey = JSON.stringify([activeLevel, lowerDocuments, next.showCity]);
+    if (!next.exteriorOnly && this.lowerFloorKey !== nextLowerFloorKey) {
+      if (this.lowerFloors) disposeGroup(this.lowerFloors);
+      this.lowerFloors = buildInteriorContext(buildingDoc, activeLevel, { showCity: next.showCity ?? true });
+      this.lowerFloors.position.y = -floorY;
+      this.scene.add(this.lowerFloors);
+      this.lowerFloorKey = nextLowerFloorKey;
+    }
+    if (this.lowerFloors) this.lowerFloors.visible = !next.exteriorOnly && activeLevel > 0;
     if (this.building) this.building.visible = !!next.exteriorOnly;
     if (this.landings) this.landings.visible = !next.exteriorOnly;
     if (this.room) this.room.visible = !next.exteriorOnly;
     this.items.visible = !next.exteriorOnly;
     this.itemPlatforms.visible = !next.exteriorOnly;
     this.wallItems.visible = next.showWalls && !next.exteriorOnly;
-    if (firstShop || exteriorChanged || levelChanged || (next.exteriorOnly && previousBuildingBounds !== JSON.stringify(this.buildingMetrics()))) {
+    if (firstShop || exteriorChanged || levelChanged || previousFloorY !== floorY || (next.exteriorOnly && previousBuildingBounds !== JSON.stringify(this.buildingMetrics()))) {
       this.resize();
       this.setView(this.view);
       this.renderer.shadowMap.needsUpdate = true;
@@ -377,6 +401,7 @@ export class ShopScene {
   }
 
   private itemSupport(item: ShopItem, shop = this.state!.shop) {
+    if ((this.state?.activeLevel ?? 0) > 0) return { baseY: 0.038 };
     if (!this.builtRoom) return { baseY: 0.038 };
     const key = JSON.stringify([item.kind, item.x, item.z, item.rotation, item.width, item.depth, shop.width, shop.depth, this.state?.showCity, this.state?.showWalls, this.transient?.entrancePosition]);
     const cached = this.itemSupportCache.get(key);
@@ -407,6 +432,7 @@ export class ShopScene {
   }
 
   private signGroundY(x: number, z: number, shop = this.state!.shop) {
+    if ((this.state?.activeLevel ?? 0) > 0) return 0.036;
     const showCity = this.state?.showCity ?? true;
     if (!this.builtRoom) return showCity ? -0.08 : -0.401;
     return standingSignGroundY(this.builtRoom.floor, this.state?.showWalls && (this.state.activeLevel ?? 0) === 0 ? this.builtRoom.entrance : undefined, x - shop.width / 2 + 0.5, z - shop.depth / 2 + 0.5, showCity);
@@ -1436,9 +1462,11 @@ export class ShopScene {
     const bounds = doc ? getFloorBounds(doc) : { width: 7, depth: 6 };
     const neighbourhoodSpace = this.view === 'orbit' && (this.state?.showCity ?? true) ? (aspect < 1 ? 1.18 : 1.5) : 1;
     const metrics = this.buildingMetrics();
+    const floorY = this.activeFloorY();
+    const interiorSpan = (Math.max(bounds.width, bounds.depth, 4) + 2.3) * (aspect < 1 ? 1.15 : 1) * neighbourhoodSpace;
     const span = exterior
       ? Math.max(metrics.width + 4, metrics.depth + 4, metrics.height + 3.5) * (this.view === 'orbit' ? 1.24 : 1.05)
-      : (Math.max(bounds.width, bounds.depth, 4) + 2.3) * (aspect < 1 ? 1.15 : 1) * neighbourhoodSpace;
+      : this.view === 'top' || floorY === 0 ? interiorSpan : Math.max(interiorSpan, floorY * 0.9 + (doc ? getWallHeight(doc) : 3) + 6);
     const halfHeight = (aspect < 1 ? span / aspect : span) / 2;
     this.camera.left = -halfHeight * aspect;
     this.camera.right = halfHeight * aspect;
@@ -1450,6 +1478,10 @@ export class ShopScene {
   };
 
   resetCamera() { this.setView('orbit'); }
+
+  private activeFloorY() {
+    return !this.state || this.state.exteriorOnly ? 0 : getLevelBaseY(this.state.building ?? this.state.shop, this.state.activeLevel ?? 0);
+  }
 
   private buildingMetrics() {
     const doc = this.state?.building ?? this.state?.shop;
@@ -1471,14 +1503,15 @@ export class ShopScene {
     const metrics = this.buildingMetrics();
     const cx = exterior ? metrics.centerX : bounds && doc ? bounds.minX + bounds.width / 2 - doc.width / 2 : 0;
     const cz = exterior ? metrics.centerZ : bounds && doc ? bounds.minZ + bounds.depth / 2 - doc.depth / 2 : 0;
-    const targetY = exterior ? metrics.height * 0.46 : view === 'orbit' ? (this.width < this.height ? 1.6 : 3.5) : 0.6;
+    const floorY = this.activeFloorY();
+    const targetY = exterior ? metrics.height * 0.46 : floorY > 0 && view !== 'top' ? 0.8 - floorY * 0.25 : view === 'orbit' ? (this.width < this.height ? 1.6 : 3.5) : 0.6;
     this.controls.target.set(cx, targetY, cz + 0.15);
     this.camera.zoom = 1;
     if (view === 'top') this.camera.position.set(cx, exterior ? metrics.height + 25 : 18, cz + 0.151);
-    else if (view === 'front') this.camera.position.set(cx + 0.4, exterior ? targetY + 3.5 : 7.4, cz + 20);
-    else this.camera.position.set(cx + (exterior ? 15 : 10.5), exterior ? targetY + 10 : 8.8, cz + (exterior ? 18 : 13.5));
+    else if (view === 'front') this.camera.position.set(cx + 0.4, exterior ? targetY + 3.5 : floorY > 0 ? targetY + 5 : 7.4, cz + 20);
+    else this.camera.position.set(cx + (exterior ? 15 : 10.5), exterior ? targetY + 10 : floorY > 0 ? targetY + 8.8 : 8.8, cz + (exterior ? 18 : 13.5));
     this.camera.far = Math.max(100, metrics.height * 5);
-    const shadowSpan = exterior ? Math.max(metrics.height, metrics.width, metrics.depth) + 6 : 12;
+    const shadowSpan = exterior ? Math.max(metrics.height, metrics.width, metrics.depth) + 6 : Math.max(12, floorY + 8);
     this.lighting.sun.position.set(exterior ? cx - 4 : -4, exterior ? metrics.height + 12 : 11, exterior ? cz + 7 : 7);
     this.lighting.sun.target.position.set(exterior ? cx : 0, 0, exterior ? cz : 0);
     this.lighting.sun.target.updateMatrixWorld();
@@ -1536,6 +1569,14 @@ export class ShopScene {
     data.exteriorOnly = String(!!this.state.exteriorOnly);
     data.roofStyle = getRoof(this.state.building ?? this.state.shop).style;
     data.buildingHeight = String(this.buildingMetrics().height);
+    data.activeFloorY = String(this.activeFloorY());
+    data.groundY = String(this.ground.position.y);
+    data.cameraTarget = JSON.stringify(this.controls.target.toArray());
+    data.contextLevels = JSON.stringify(this.lowerFloors?.visible ? this.lowerFloors.children.map(level => ({
+      level: level.userData.level, floorY: level.userData.floorY, opacity: level.userData.contextOpacity,
+      sceneY: level.getWorldPosition(new THREE.Vector3()).y,
+    })) : []);
+    data.stairOpenings = JSON.stringify(getStairOpenings(this.state.building ?? this.state.shop, this.state.activeLevel ?? 0));
     // Inspect the rendered objects in either view, so mode-switch checks can detect stale geometry.
     const pose = (object: THREE.Object3D) => ({
       position: object.getWorldPosition(new THREE.Vector3()).toArray(),
@@ -1623,7 +1664,9 @@ export class ShopScene {
     this.updateLightingMetadata();
     if (this.renderDirty) {
       this.renderer.render(this.scene, this.camera);
-      if (this.state) this.renderer.domElement.dataset.ready = 'true';
+      if (this.state && this.renderer.domElement.dataset.transitioning !== 'true') {
+        this.renderer.domElement.dataset.ready = 'true'; this.callbacks.onFrame?.();
+      }
       this.renderDirty = false;
     }
     this.animation = requestAnimationFrame(this.animate);

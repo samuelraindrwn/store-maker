@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { ShopDocument, ShopItem, WallItem } from '../model';
 import { ShopScene, type CameraView, type Cell } from '../scene/ShopScene';
+import './ShopCanvas.css';
 
 export type SceneHandle = {
   resetCamera: () => void;
@@ -13,6 +14,7 @@ export type ShopCanvasProps = {
   building?: ShopDocument;
   activeLevel?: number;
   exteriorOnly?: boolean;
+  revision?: number;
   selectedId: string | null;
   placement: ShopItem | null;
   selectedWallId: string | null;
@@ -44,6 +46,10 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
   const latest = useRef(props);
   latest.current = props;
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const applied = useRef<ShopCanvasProps | null>(null);
+  const awaitingFrame = useRef(false);
+  const revealFrame = useRef(0);
 
   useImperativeHandle(ref, () => ({
     resetCamera: () => engine.current?.resetCamera(),
@@ -54,7 +60,11 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
   useEffect(() => {
     if (!mount.current) return;
     let instance: ShopScene | null = null;
+    let secondFrame = 0;
+    // Paint the loading veil before constructing WebGL or generating geometry.
+    const firstFrame = requestAnimationFrame(() => { secondFrame = requestAnimationFrame(() => {
     try {
+      if (!mount.current) return;
       instance = new ShopScene(mount.current, {
         onSelect: (id) => latest.current.onSelect(id),
         onCell: (x, z) => latest.current.onCell(x, z),
@@ -66,29 +76,79 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
         onMove: (id, x, z) => latest.current.onMove?.(id, x, z),
         onChange: (doc, label) => latest.current.onChange(doc, label),
         onInteraction: (message) => latest.current.onInteraction?.(message),
-        onError: setError,
+        onError: message => { setError(message); setLoading(false); },
+        onFrame: () => {
+          if (!awaitingFrame.current) return;
+          awaitingFrame.current = false;
+          revealFrame.current = requestAnimationFrame(() => setLoading(false));
+        },
       });
       engine.current = instance;
+      awaitingFrame.current = true;
+      applied.current = latest.current;
       instance.update(latest.current);
     } catch (cause) {
       instance?.dispose();
       engine.current = null;
       setError('Tampilan 3D belum bisa dibuka di browser ini. Aktifkan akselerasi grafis atau coba browser terbaru.');
+      setLoading(false);
       console.error('ShopCanvas could not initialise WebGL', cause);
     }
+    }); });
     return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+      cancelAnimationFrame(revealFrame.current);
+      awaitingFrame.current = false;
       instance?.dispose();
       engine.current = null;
+      applied.current = null;
     };
   }, []);
 
   useEffect(() => {
-    engine.current?.update(props);
-  }, [props.shop, props.building, props.activeLevel, props.exteriorOnly, props.selectedId, props.placement, props.selectedWallId, props.selectedDoor, props.resizeMode, props.wallPlacement, props.showGrid, props.showWalls, props.preview, props.editMode, props.buildTool, props.showCity, props.nightMode]);
+    const instance = engine.current, previous = applied.current;
+    if (!instance || !previous) return;
+    const changingView = props.exteriorOnly !== previous.exteriorOnly || props.activeLevel !== previous.activeLevel
+      || props.revision !== previous.revision || (props.exteriorOnly && props.building !== previous.building);
+    if (!changingView) {
+      applied.current = props;
+      // A quick reversal may cancel a queued switch and return to this view.
+      // Its next frame must also release any loading veil left by that switch.
+      awaitingFrame.current = true;
+      instance.renderer.domElement.dataset.transitioning = 'false';
+      instance.update(props);
+      return;
+    }
+    setLoading(true);
+    instance.renderer.domElement.dataset.ready = 'false';
+    instance.renderer.domElement.dataset.transitioning = 'true';
+    awaitingFrame.current = false;
+    cancelAnimationFrame(revealFrame.current);
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => { secondFrame = requestAnimationFrame(() => {
+      applied.current = latest.current;
+      awaitingFrame.current = true;
+      instance.renderer.domElement.dataset.transitioning = 'false';
+      try { instance.update(latest.current); }
+      catch (cause) {
+        awaitingFrame.current = false;
+        setLoading(false);
+        setError('Tampilan belum berhasil diperbarui. Muat ulang halaman untuk membuka desain tersimpan.');
+        console.error('ShopCanvas could not update the scene', cause);
+      }
+    }); });
+    return () => { cancelAnimationFrame(firstFrame); cancelAnimationFrame(secondFrame); };
+  }, [props.shop, props.building, props.activeLevel, props.exteriorOnly, props.revision, props.selectedId, props.placement, props.selectedWallId, props.selectedDoor, props.resizeMode, props.wallPlacement, props.showGrid, props.showWalls, props.preview, props.editMode, props.buildTool, props.showCity, props.nightMode]);
 
   return (
-    <div className="shop-canvas" style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: '#e8e3ed' }}>
+    <div className="shop-canvas" aria-busy={loading} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: '#e8e3ed' }}>
       <div ref={mount} style={{ position: 'absolute', inset: 0 }} />
+      <div className={`scene-loading ${loading ? 'is-loading' : ''}`} data-testid="scene-loading" role={loading ? 'status' : undefined} aria-hidden={!loading}>
+        <div className="scene-loading-mark" aria-hidden="true"><i /><i /><i /></div>
+        <strong>{props.exteriorOnly ? 'Menyiapkan tampilan luar' : `Menyiapkan lantai ${(props.activeLevel ?? 0) + 1}`}</strong>
+        <span>Sebentar, tokomu sedang ditata.</span>
+      </div>
       {error && (
         <div role="alert" style={{ position: 'absolute', inset: 0, display: 'grid', placeContent: 'center', gap: 12, padding: 32, textAlign: 'center', background: '#eee9f2', color: '#51445d' }}>
           <span aria-hidden="true" style={{ fontSize: 34 }}>◇</span>

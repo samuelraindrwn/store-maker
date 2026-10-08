@@ -25,11 +25,12 @@ class Node {
 class Source extends Node {
   loop = false;
   starts: number[] = [];
+  offsets: number[] = [];
   stopAt: number | null = null;
   ended = false;
   onended: (() => void) | null = null;
   constructor(kind: string, private context: Context) { super(kind); }
-  start(when = this.context.currentTime) { this.starts.push(when); }
+  start(when = this.context.currentTime, offset = 0) { this.starts.push(when); this.offsets.push(offset); }
   stop(when = this.context.currentTime) { this.stopAt = when; }
   flush() {
     if (!this.ended && this.stopAt !== null && this.stopAt <= this.context.currentTime) {
@@ -40,7 +41,8 @@ class Source extends Node {
 
 class Buffer {
   channels: Float32Array[];
-  constructor(channelCount: number, length: number) { this.channels = Array.from({ length: channelCount }, () => new Float32Array(length)); }
+  constructor(channelCount: number, readonly length: number, readonly sampleRate = 8000) { this.channels = Array.from({ length: channelCount }, () => new Float32Array(length)); }
+  get duration() { return this.length / this.sampleRate; }
   getChannelData(channel: number) { return this.channels[channel]; }
 }
 
@@ -63,7 +65,9 @@ class Context {
   createBiquadFilter() { return this.node('filter'); }
   createDynamicsCompressor() { return this.node('compressor'); }
   createConvolver() { return this.node('convolver'); }
-  createBuffer(channels: number, length: number) { return new Buffer(channels, length); }
+  createChannelMerger() { return this.node('merger'); }
+  createChannelSplitter() { return this.node('splitter'); }
+  createBuffer(channels: number, length: number, sampleRate = this.sampleRate) { return new Buffer(channels, length, sampleRate); }
   private source(kind: string) { const node = new Source(kind, this); this.nodes.push(node); return node; }
   createOscillator() { return this.source('oscillator'); }
   createBufferSource() { return this.source('buffer-source'); }
@@ -82,6 +86,25 @@ class Context {
   async close() { this.closeCalls++; this.state = 'closed'; }
   flush() { this.nodes.forEach(node => { if (node instanceof Source) node.flush(); }); }
 }
+
+class OfflineContext extends Context {
+  static rendered: OfflineContext[] = [];
+  static gate: Promise<void> | null = null;
+  constructor(readonly channels: number, readonly frames: number, sampleRate: number) {
+    super(); Context.created.pop(); this.sampleRate = sampleRate;
+    OfflineContext.rendered.push(this);
+  }
+  async startRendering() {
+    if (OfflineContext.gate) await OfflineContext.gate;
+    const result = this.createBuffer(this.channels, this.frames);
+    // Distinguish the cycle with complete note tails from the silent-start cycle.
+    for (let channel = 0; channel < this.channels; channel++) result.getChannelData(channel).fill(channel + 1, this.frames / 2);
+    return result;
+  }
+}
+
+async function finishRendering() { for (let tick = 0; tick < 5; tick++) await Promise.resolve(); }
+function musicLoops(context: Context) { return context.nodes.filter(node => node.kind === 'buffer-source' && node.buffer?.channels.length === 2) as Source[]; }
 
 function deferred() {
   let resolve!: () => void;
@@ -105,7 +128,9 @@ function advance(milliseconds: number) {
 beforeEach(() => {
   vi.useFakeTimers();
   Context.created = []; Context.nextResumeGate = null; Context.nextResumeError = null;
+  OfflineContext.rendered = []; OfflineContext.gate = null;
   vi.stubGlobal('AudioContext', Context); vi.stubGlobal('webkitAudioContext', undefined);
+  vi.stubGlobal('OfflineAudioContext', undefined); vi.stubGlobal('webkitOfflineAudioContext', undefined);
 });
 
 afterEach(() => {
@@ -370,7 +395,8 @@ describe('CozyAmbience lifecycle and bounded musical scheduling', () => {
     context.currentTime += 60 * 60; context.flush();
     const count = oscillators(context).length;
     advance(40);
-    expect(oscillators(context).length - count).toBeLessThanOrEqual(12);
+    expect(oscillators(context).length - count).toBeLessThanOrEqual(36);
+    expect(oscillators(context).slice(count).every(source => source.starts[0] >= context.currentTime)).toBe(true);
     expect(vi.getTimerCount()).toBe(1);
   });
 
@@ -394,5 +420,104 @@ describe('CozyAmbience lifecycle and bounded musical scheduling', () => {
     expect(Context.created[0].closeCalls).toBe(1);
     expect(Context.created[0].nodes.every(node => node.disconnected)).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('audio-thread playback during scene generation', () => {
+  beforeEach(() => { vi.stubGlobal('OfflineAudioContext', OfflineContext); });
+
+  it.each(['cheerful', 'calm'] as const)('continues the %s score through a long main-thread stall without a timer, restart, or lost notes', async track => {
+    const gate = deferred(); OfflineContext.gate = gate.promise;
+    const music = player(); music.setTrack(track); await music.play();
+    const context = Context.created[0];
+    expect(oscillators(context).length).toBeGreaterThan(0);
+    context.currentTime = 0.8;
+    gate.resolve(); await finishRendering();
+    const [loop] = musicLoops(context);
+    expect(loop).toBeDefined(); expect(loop.loop).toBe(true);
+    expect(loop.starts[0]).toBeCloseTo(0.835);
+    expect(loop.offsets[0]).toBeCloseTo(0.835 - 0.045);
+    expect(loop.buffer!.getChannelData(0)[0]).toBe(1);
+    expect(loop.buffer!.getChannelData(1)[0]).toBe(2);
+    expect(vi.getTimerCount()).toBe(0);
+    const count = context.nodes.length;
+    // Web Audio's clock advances even when expensive Three.js work blocks JS.
+    context.currentTime += 120; context.flush();
+    expect(loop.stopAt).toBeNull(); expect(loop.disconnected).toBe(false);
+    await music.play();
+    expect(loop.starts).toHaveLength(1);
+    expect(context.nodes).toHaveLength(count);
+    expect(context.resumeCalls).toBe(1); expect(context.suspendCalls).toBe(0);
+    expect(Context.created).toHaveLength(1); expect(OfflineContext.rendered).toHaveLength(1);
+  });
+
+  it('keeps volume, pause, resume, and track selection effective without restarting on ordinary play calls', async () => {
+    const music = player(); await music.play(); await finishRendering();
+    const context = Context.created[0], initial = musicLoops(context)[0];
+    music.setVolume(0.62);
+    expect(master(context).gain.events.at(-1)?.value).toBe(0.62);
+    music.pause();
+    expect(initial.stopAt).toBeCloseTo(context.currentTime + 0.205);
+    advance(300); await Promise.resolve();
+    expect(context.state).toBe('suspended'); expect(initial.disconnected).toBe(true);
+    await music.play(); await finishRendering();
+    expect(musicLoops(context)).toHaveLength(2);
+    expect(OfflineContext.rendered).toHaveLength(1);
+    expect(master(context).gain.events.at(-1)?.value).toBe(0.62);
+    music.setTrack('calm'); await finishRendering(); advance(240);
+    const loops = musicLoops(context);
+    expect(loops).toHaveLength(3);
+    expect(loops.slice(0, 2).every(source => source.disconnected)).toBe(true);
+    expect(loops[2].buffer!.duration).toBeCloseTo(32 * 60 / 72);
+    expect(loops[2].stopAt).toBeNull(); expect(vi.getTimerCount()).toBe(0);
+    music.dispose();
+    expect(context.nodes.every(node => node.disconnected)).toBe(true);
+    expect(context.closeCalls).toBe(1);
+  });
+
+  it('does not resume a paused or disposed player when background rendering finishes', async () => {
+    const gate = deferred(); OfflineContext.gate = gate.promise;
+    const music = player(); await music.play();
+    const context = Context.created[0];
+    music.pause(); advance(300);
+    gate.resolve(); await finishRendering();
+    expect(musicLoops(context)).toHaveLength(0);
+    expect(context.state).toBe('suspended'); expect(vi.getTimerCount()).toBe(0);
+    const disposedGate = deferred(); OfflineContext.gate = disposedGate.promise;
+    const disposedMusic = player(); await disposedMusic.play();
+    const disposedContext = Context.created[1];
+    disposedMusic.dispose(); disposedGate.resolve(); await finishRendering();
+    expect(musicLoops(disposedContext)).toHaveLength(0);
+    expect(disposedContext.state).toBe('closed'); expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('ignores an outdated rendered track and reuses each completed score when switching back', async () => {
+    const gate = deferred(); OfflineContext.gate = gate.promise;
+    const music = player(); await music.play();
+    const context = Context.created[0];
+    music.setTrack('calm');
+    gate.resolve(); await finishRendering();
+    expect(musicLoops(context)).toHaveLength(1);
+    expect(musicLoops(context)[0].buffer!.duration).toBeCloseTo(32 * 60 / 72);
+    music.setTrack('cheerful'); await finishRendering(); advance(240);
+    expect(musicLoops(context)).toHaveLength(2);
+    expect(musicLoops(context)[1].buffer!.duration).toBeCloseTo(32 * 60 / 104, 3);
+    expect(OfflineContext.rendered).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps the existing player running when offline rendering fails', async () => {
+    class UnavailableOfflineContext extends OfflineContext {
+      async startRendering(): Promise<Buffer> { throw new Error('Audio rendering unavailable'); }
+    }
+    vi.stubGlobal('OfflineAudioContext', UnavailableOfflineContext);
+    const music = player(); await music.play(); await finishRendering();
+    const context = Context.created[0], count = oscillators(context).length;
+    advance(2000);
+    expect(musicLoops(context)).toHaveLength(0);
+    expect(context.state).toBe('running');
+    expect(oscillators(context).length).toBeGreaterThan(count);
+    expect(vi.getTimerCount()).toBe(1);
+    expect(Context.created).toHaveLength(1);
   });
 });

@@ -178,8 +178,11 @@ describe('stairs, stockroom and bathroom geometry', () => {
     const doc = building(2); doc.items = [{ ...makeItem('stairs'), x: 1, z: 1 }];
     const group = buildStairLandings(doc, 1);
     try {
-      expect(group.getObjectByName('landing:stairs')!.position.x).toBe(-1);
-      expect(group.getObjectByName('stair-landing-opening')).toBeDefined();
+      const opening = group.getObjectByName('landing:stairs')!.userData.stairOpening;
+      expect((opening.minX + opening.maxX) / 2).toBeCloseTo(-1);
+      expect(group.getObjectByName('stairwell-rim')).toBeDefined();
+      expect(group.getObjectByName('stairwell-guardrail')).toBeDefined();
+      expect(group.getObjectByName('stair-landing-opening')).toBeUndefined();
     } finally { disposeGroup(group); }
   });
   it('models stocked shelves and recognizable bathroom fittings', () => {

@@ -154,7 +154,7 @@ test('legacy single-floor design is preserved and utility catalog places on the 
   expect(errors).toEqual([]);
 });
 
-test('legacy one-floor exterior recreates the canvas, repaints, and can recover by reselecting the mode', async ({ page }, info) => {
+test('legacy one-floor exterior reuses the canvas, repaints, and can refresh by reselecting the mode', async ({ page }, info) => {
   test.setTimeout(90_000);
   const legacy = createInitialShop();
   delete legacy.upperFloors;
@@ -166,7 +166,7 @@ test('legacy one-floor exterior recreates the canvas, repaints, and can recover 
   const first = await canvas(page).elementHandle();
   const interior = await canvas(page).screenshot();
   await button(page, 'Eksterior').click();
-  await expect.poll(() => first!.evaluate(node => node.isConnected)).toBe(false);
+  expect(await first!.evaluate(node => node.isConnected)).toBe(true);
   await expect(canvas(page)).toHaveAttribute('data-ready', 'true');
   await expect(canvas(page)).toHaveAttribute('data-exterior-only', 'true');
   await expect(canvas(page)).toHaveAttribute('data-item-centers', '[]');
@@ -175,7 +175,7 @@ test('legacy one-floor exterior recreates the canvas, repaints, and can recover 
   expect(await saved(page)).toEqual(legacy);
   const second = await canvas(page).elementHandle();
   await button(page, 'Eksterior').click();
-  await expect.poll(() => second!.evaluate(node => node.isConnected)).toBe(false);
+  expect(await second!.evaluate(node => node.isConnected)).toBe(true);
   await expect(canvas(page)).toHaveAttribute('data-ready', 'true');
   await expect(canvas(page)).toHaveAttribute('data-exterior-only', 'true');
   await button(page, 'Interior').click();

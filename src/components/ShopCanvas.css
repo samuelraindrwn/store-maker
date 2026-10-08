@@ -1,0 +1,23 @@
+.scene-loading {
+  position: absolute; inset: 0; z-index: 15;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px;
+  color: #736580; background: radial-gradient(ellipse at center, #faf7f1f7, #eee8f4ed);
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity 220ms ease, visibility 220ms;
+}
+.scene-loading.is-loading { opacity: 1; visibility: visible; pointer-events: auto; transition: none; }
+.scene-loading strong { font-size: 15px; }
+.scene-loading > span { font-size: 12px; color: #968b9e; }
+.scene-loading-mark { position: relative; width: 62px; height: 66px; margin-bottom: 12px; }
+.scene-loading-mark i {
+  position: absolute; width: 42px; height: 28px; left: 10px; top: 30px;
+  border: 2px solid #a38bc8; border-radius: 6px; background: #e3d9ef;
+  transform: rotate(-25deg) skew(25deg); animation: scene-layer-breathe 1.4s ease-in-out infinite;
+}
+.scene-loading-mark i:nth-child(2) { top: 18px; animation-delay: 150ms; background: #eee5f5; }
+.scene-loading-mark i:nth-child(3) { top: 6px; animation-delay: 300ms; background: #f8f1e7; }
+@keyframes scene-layer-breathe { 50% { translate: 0 -5px; } }
+@media (prefers-reduced-motion: reduce) {
+  .scene-loading { transition: none; }
+  .scene-loading-mark i { animation: none; }
+}

@@ -19,8 +19,8 @@ Buka **http://127.0.0.1:4330**. Di Windows, jalankan `run.bat` atau `./run.bat` 
 
 Contoh baru memiliki **dua lantai**: toko, kamar mandi, dan tangga di lantai 1; rak gudang di lantai 2. Desain yang sudah tersimpan tetap dipertahankan. Gunakan **Reset ke toko contoh** untuk mencoba contoh baru (bisa diurungkan).
 
-- **Jumlah lantai** memilih 1 sampai **4 lantai**. Tombol **LT 1–4** memilih lantai yang sedang ditata. Interior menampilkan satu lantai terbuka agar barang mudah dipilih; bentuk lantai, dinding, perabot, dan aksesori masing-masing lantai dapat diubah sendiri.
-- Lantai baru mengikuti bentuk lantai sebelumnya. Tangga ditambahkan di lantai penghubung jika ada ruang; tangga tambahan dapat dipasang dari **Gudang & utilitas**. Katalog ini juga memuat rak gudang berisi kardus dan modul kamar mandi dengan toilet, wastafel, serta pancuran.
+- **Jumlah lantai** memilih 1 sampai **4 lantai**. Tombol **LT 1–4** memilih lantai yang sedang ditata. Lantai pilihan tampil penuh pada ketinggian bangunannya; lantai di bawah tetap terlihat samar sebagai konteks, dengan kamera berfokus pada lantai aktif. Hanya lantai aktif yang dapat diedit.
+- Lantai baru mengikuti bentuk lantai sebelumnya. Tangga ditambahkan di lantai penghubung jika ada ruang; tangga tambahan dapat dipasang dari **Gudang & utilitas**. Lantai atas memiliki bukaan sungguhan sesuai posisi, arah, dan ukuran tangga di bawah, dengan pagar di tepinya. Katalog ini juga memuat rak gudang berisi kardus dan modul kamar mandi dengan toilet, wastafel, serta pancuran.
 - **Eksterior** memperlihatkan seluruh bangunan dari luar dengan pintu dan jendela yang sama seperti desain Interior. Posisi, arah, bentuk, ukuran, warna, dan keadaan pintu tetap sama; jendela hanya muncul di tempat yang dipasang. Atur warna fasad dan lis, kanopi masuk, serta **Genteng** atau **Rooftop**. Atap genteng memiliki bidang miring dan barisan genteng; rooftop memiliki pagar pembatas dan pilihan taman dengan pergola.
 - **Lihat tokoku** menyembunyikan panel. Dalam mode Eksterior, foto yang diunduh menampilkan seluruh bangunan dan atap. Pilihan siang/malam tetap tersedia.
 - Mengurangi jumlah lantai menghapus lantai paling atas berikut isinya dalam satu langkah; **Urungkan** memulihkannya. Semua lantai, fasad, dan atap ikut autosave, undo/redo, ekspor, serta impor, termasuk ketika file disimpan saat sedang menata lantai atas.
@@ -28,6 +28,8 @@ Contoh baru memiliki **dua lantai**: toko, kamar mandi, dan tangga di lantai 1; 
 ### Musik
 
 Menu **Atur musik dan volume** menyediakan musik cozy ceria (melodi original dengan bunyi petik dan marimba) serta **Piano & gerimis**. Musik ceria dipilih secara default; pilihan lagu dan volume diingat di browser. Musik mengikuti izin autoplay browser, dapat dijeda, dan berhenti saat tab disembunyikan. Seluruh musik disintesis secara lokal tanpa unduhan audio atau layanan luar.
+
+Pergantian Interior/Eksterior dan lantai menampilkan loading singkat, lalu membuka scene setelah frame baru siap. Canvas tetap dipakai ulang. Musik yang sudah disiapkan berjalan sebagai loop audio native, sehingga pembangunan model 3D tidak memutus atau mengulang lagunya.
 
 ### Menata ruangan
 

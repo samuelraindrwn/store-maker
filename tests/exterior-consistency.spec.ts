@@ -77,6 +77,7 @@ test('saved windows keep their rendered size, style and position outside, and de
   await page.getByLabel('Panjang aksesori', { exact: true }).fill('3.2');
   await page.getByLabel('Panjang aksesori', { exact: true }).press('Enter');
   await page.getByLabel('Dinding aksesori', { exact: true }).selectOption('left:0:0:7');
+  await expect.poll(async () => (await rendered(page, 'windows'))[0].position).not.toEqual(original[0].position);
   const edited = await rendered(page, 'windows');
   expect(edited[0].style).toBe('arched');
   expect(edited[0].position).not.toEqual(original[0].position);

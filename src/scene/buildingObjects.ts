@@ -3,9 +3,18 @@ import { getEntranceAnchor, getEntranceRotation, getExterior, getFloorBounds, ge
 import { applyWallItemSize, box, buildItem, buildRoom, buildWallItem, disposeGroup } from './objects';
 import { wallPanels } from './wallGeometry';
 import { getItemSupport } from './itemSupport';
+import { buildStairwellRims, getStairOpenings } from './stairGeometry';
 
 export const LEVEL_SLAB = 0.24;
 type Edge = { side: 'north' | 'south' | 'east' | 'west'; line: number; start: number; end: number };
+
+/** Floor zero starts at ground; each higher floor follows the actual height below it. */
+export function getLevelBaseY(building: ShopDocument, level: number): number {
+  if (!Number.isInteger(level) || level < 0 || level > getLevelCount(building)) throw new RangeError('Invalid floor index');
+  let base = 0;
+  for (let lower = 0; lower < level; lower++) base += getWallHeight(getLevelDocument(building, lower)) + LEVEL_SLAB;
+  return base;
+}
 
 /** Each level has its own grid origin: frame their union in shared world coordinates. */
 export function getBuildingBounds(building: ShopDocument) {
@@ -167,65 +176,102 @@ function closeCutawayWalls(parent: THREE.Group, shop: ShopDocument, groundFloor:
   }
 }
 
-/** A closed view of the authored rooms, sharing their floor, entrance, windows and contents. */
-export function buildBuilding(building: ShopDocument, options: { showCity?: boolean } = {}) {
-  const group = new THREE.Group(); group.name = 'shop-building-exterior';
-  const facade = getExterior(building), count = getLevelCount(building); let base = 0;
-  for (let level = 0; level < count; level++) {
-    const shop = getLevelDocument(building, level), height = getWallHeight(shop), floor = new THREE.Group();
-    floor.name = `exterior-level:${level + 1}`; floor.position.y = base; floor.userData.level = level; floor.userData.floorY = base; group.add(floor);
-    // Reuse the actual room instead of generating a second, unrelated shop facade.
-    const room = buildRoom({ ...shop, wallColor: facade.wallColor, exterior: facade }, level > 0 ? { slabDepth: LEVEL_SLAB } : {});
-    room.group.name = 'exterior-room'; floor.add(room.group);
+/** Both exterior and floor context use fresh, disposable copies of the authored layout. */
+function buildAuthoredLevel(building: ShopDocument, level: number, options: { showCity?: boolean; exterior?: boolean }) {
+  const shop = getLevelDocument(building, level), height = getWallHeight(shop), floor = new THREE.Group();
+  const facade = getExterior(building), base = getLevelBaseY(building, level);
+  const prefix = options.exterior ? 'exterior' : 'interior-context';
+  floor.name = `${prefix}-level:${level + 1}`; floor.position.y = base; floor.userData.level = level; floor.userData.floorY = base;
+  const room = buildRoom({ ...shop, wallColor: options.exterior ? facade.wallColor : shop.wallColor, exterior: facade }, {
+    ...(level > 0 ? { slabDepth: LEVEL_SLAB } : {}), floorOpenings: getStairOpenings(building, level),
+  });
+  room.group.name = `${prefix}-room`; floor.add(room.group);
+  if (level > 0) floor.add(buildStairwellRims(building, level));
+  if (options.exterior) {
     room.walls.traverse(object => {
       if (object.userData.wallCoping && object instanceof THREE.Mesh && object.material instanceof THREE.MeshStandardMaterial) {
         object.material.color.set(facade.trimColor);
       }
     });
-    if (level > 0) disposeGroup(room.entrance);
     if (room.hasFloor) closeCutawayWalls(floor, shop, level === 0, facade.wallColor, facade.trimColor);
-    for (const item of getWallItems(shop)) {
-      const object = buildWallItem(item, shop), point = wallItemPosition(shop, item);
-      applyWallItemSize(object, item);
-      object.position.set(point.x, point.y, point.z); object.rotation.y = point.rotation;
-      object.userData.wallItemId = item.id;
-      object.userData.wallItemKind = item.kind;
-      floor.add(object);
-    }
-    // Saved furniture remains visible through real glass/open doors at its actual position.
-    for (const item of shop.items) {
-      const object = buildItem(item, height + LEVEL_SLAB), footprint = getItemFootprint(item);
-      const support = level === 0 ? getItemSupport(shop, item, room.floor, room.entrance, options.showCity ?? true) : { baseY: 0.038 };
-      object.position.set(item.x - shop.width / 2 + footprint.width / 2, support.baseY, item.z - shop.depth / 2 + footprint.depth / 2);
-      object.rotation.y = -THREE.MathUtils.degToRad(item.rotation); floor.add(object);
-      if (support.foundation) {
-        const f = support.foundation;
-        box(floor, f.width, f.top - f.bottom, f.depth, '#d3c4ba', f.x, (f.top + f.bottom) / 2, f.z, 0).name = 'standing-sign-foundation';
-      }
-    }
-    base += height + LEVEL_SLAB;
   }
+  if (level > 0) disposeGroup(room.entrance);
+  for (const item of getWallItems(shop)) {
+    const object = buildWallItem(item, shop), point = wallItemPosition(shop, item);
+    applyWallItemSize(object, item);
+    object.position.set(point.x, point.y, point.z); object.rotation.y = point.rotation;
+    object.userData.wallItemId = item.id;
+    object.userData.wallItemKind = item.kind;
+    floor.add(object);
+  }
+  // Saved furniture remains visible through glass, stairwells and the cutaway.
+  for (const item of shop.items) {
+    const object = buildItem(item, height + LEVEL_SLAB), footprint = getItemFootprint(item);
+    const support = level === 0 ? getItemSupport(shop, item, room.floor, room.entrance, options.showCity ?? true) : { baseY: 0.038 };
+    object.position.set(item.x - shop.width / 2 + footprint.width / 2, support.baseY, item.z - shop.depth / 2 + footprint.depth / 2);
+    object.rotation.y = -THREE.MathUtils.degToRad(item.rotation); floor.add(object);
+    if (support.foundation) {
+      const f = support.foundation;
+      box(floor, f.width, f.top - f.bottom, f.depth, '#d3c4ba', f.x, (f.top + f.bottom) / 2, f.z, 0).name = 'standing-sign-foundation';
+    }
+  }
+  return floor;
+}
+
+/** A closed view of the authored rooms, sharing their floor, entrance, windows and contents. */
+export function buildBuilding(building: ShopDocument, options: { showCity?: boolean } = {}) {
+  const group = new THREE.Group(); group.name = 'shop-building-exterior';
+  const count = getLevelCount(building), base = getLevelBaseY(building, count);
+  for (let level = 0; level < count; level++) group.add(buildAuthoredLevel(building, level, { ...options, exterior: true }));
   group.add(buildRoof(building, getLevelDocument(building, count - 1), base - LEVEL_SLAB));
   group.userData.levelCount = count; group.userData.buildingHeight = base;
   return group;
 }
 
-/** Visible landing hatches line up with the top of the flight on the floor below. */
-export function buildStairLandings(building: ShopDocument, activeLevel: number) {
-  const group = new THREE.Group(); group.name = 'stair-landings';
-  if (activeLevel <= 0) return group;
-  const lower = getLevelDocument(building, activeLevel - 1), current = getLevelDocument(building, activeLevel);
-  for (const item of lower.items.filter(item => item.kind === 'stairs')) {
-    const footprint = getItemFootprint(item), landing = new THREE.Group(); landing.name = `landing:${item.id}`;
-    landing.position.set(item.x - lower.width / 2 + footprint.width / 2, 0.04, item.z - lower.depth / 2 + footprint.depth / 2);
-    landing.rotation.y = -THREE.MathUtils.degToRad(item.rotation);
-    const w = item.width ?? 2, d = item.depth ?? 3;
-    box(landing, w * 0.87, 0.018, d * 0.36, '#81736c', 0, 0.009, -d * 0.30).name = 'stair-landing-opening';
-    for (let step = 0; step < 4; step++) box(landing, w * 0.81, 0.01, 0.035, '#bca282', 0, 0.023, -d * 0.45 + step * d * 0.085);
-    // Do not add disconnected hatches where the upper floor was removed.
-    const center = landing.position;
-    const cellX = Math.floor(center.x + current.width / 2), cellZ = Math.floor(center.z + current.depth / 2);
-    if (getFloorCells(current).some(cell => cell.x === cellX && cell.z === cellZ)) group.add(landing);
+/** Faint, inert lower floors establish height without obstructing the active editor. */
+export function buildInteriorContext(building: ShopDocument, activeLevel: number, options: { showCity?: boolean; opacity?: number } = {}) {
+  if (!Number.isInteger(activeLevel) || activeLevel < 0 || activeLevel >= getLevelCount(building)) throw new RangeError('Invalid floor index');
+  const group = new THREE.Group(); group.name = 'interior-lower-floor-context';
+  const opacity = Number.isFinite(options.opacity) ? THREE.MathUtils.clamp(options.opacity!, 0, 1) : 0.2;
+  const stairOpacity = Math.max(opacity, 0.65), materials = new Set<THREE.Material>();
+  group.userData.activeLevel = activeLevel;
+  group.userData.activeFloorY = getLevelBaseY(building, activeLevel);
+  group.userData.levels = Array.from({ length: activeLevel }, (_, level) => level);
+  group.userData.opacity = opacity;
+  group.userData.connectingStairOpacity = stairOpacity;
+  const fade = (object: THREE.Object3D, currentOpacity: number, connectingFloor: boolean) => {
+    if (connectingFloor && typeof object.userData.stairRise === 'number') {
+      currentOpacity = stairOpacity;
+      object.userData.contextOpacity = currentOpacity;
+    }
+    object.castShadow = false; object.receiveShadow = false; object.renderOrder = -1;
+    object.raycast = () => undefined;
+    delete object.userData.nightLight;
+    delete object.userData.interaction;
+    if (object instanceof THREE.Light) object.visible = false;
+    if (object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.Points) {
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+        if (materials.has(material)) continue;
+        materials.add(material);
+        material.transparent = true; material.opacity *= currentOpacity; material.depthWrite = false;
+        delete material.userData.nightGlow;
+        delete material.userData.nightOpacity;
+        if (material instanceof THREE.MeshStandardMaterial) { material.emissive.set(0); material.emissiveIntensity = 0; }
+        material.needsUpdate = true;
+      }
+    }
+    for (const child of object.children) fade(child, currentOpacity, connectingFloor);
+  };
+  for (let level = 0; level < activeLevel; level++) {
+    const floor = buildAuthoredLevel(building, level, options);
+    floor.userData.contextOpacity = opacity;
+    fade(floor, opacity, level === activeLevel - 1);
+    group.add(floor);
   }
   return group;
+}
+
+/** Open rims and guard rails surround the real stairwell, without hiding the flight. */
+export function buildStairLandings(building: ShopDocument, activeLevel: number) {
+  return buildStairwellRims(building, activeLevel);
 }

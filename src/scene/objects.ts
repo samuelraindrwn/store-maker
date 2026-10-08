@@ -7,6 +7,7 @@ import { buildWindowGeometry, buildWindowSpandrels } from './windowGeometry';
 import { buildStockProduct } from './stockObjects';
 import { buildCatalogItem } from './catalogObjects';
 import { buildBuildingFurniture } from './buildingFurniture';
+import { subtractFloorOpenings, type FloorOpening } from './stairGeometry';
 export { buildCity } from './city';
 
 const CREAM = '#f5ead6';
@@ -505,24 +506,29 @@ function contourRuns(shop: ShopDocument, side: 'north' | 'west' | 'south' | 'eas
 }
 
 /** Only occupied cells have a slab: concave outlines and holes stay visibly open. */
-function buildContourFloor(shop: ShopDocument, floor: THREE.Group, slabDepth = 0.39) {
+function buildContourFloor(shop: ShopDocument, floor: THREE.Group, slabDepth = 0.39, openings: readonly FloorOpening[] = []) {
   const cells = getFloorCells(shop);
   const matrix = new THREE.Matrix4();
   const tileColor = new THREE.Color(shop.floorColor);
   const layers = [
-    { name: 'floor-cell-slabs', geometry: new THREE.BoxGeometry(1, slabDepth - 0.09, 1), color: '#d3c4ba', y: -(slabDepth + 0.09) / 2 },
-    { name: 'floor-cell-edges', geometry: new THREE.BoxGeometry(1, 0.09, 1), color: '#fff4dc', y: -0.055 },
-    { name: 'floor-cell-tiles', geometry: new RoundedBoxGeometry(0.985, 0.055, 0.985, 1, 0.006), color: '#ffffff', y: -0.003 },
+    { name: 'floor-cell-slabs', geometry: new THREE.BoxGeometry(1, slabDepth - 0.09, 1), color: '#d3c4ba', y: -(slabDepth + 0.09) / 2, inset: 0 },
+    { name: 'floor-cell-edges', geometry: new THREE.BoxGeometry(1, 0.09, 1), color: '#fff4dc', y: -0.055, inset: 0 },
+    { name: 'floor-cell-tiles', geometry: new RoundedBoxGeometry(1, 0.055, 1, 1, 0.006), color: '#ffffff', y: -0.003, inset: 0.0075 },
   ];
   for (const layer of layers) {
-    const batch = new THREE.InstancedMesh(layer.geometry, material(layer.color), cells.length);
+    const pieces = cells.flatMap(cell => {
+      const rectangle = { minX: cell.x - shop.width / 2 + layer.inset, maxX: cell.x + 1 - shop.width / 2 - layer.inset, minZ: cell.z - shop.depth / 2 + layer.inset, maxZ: cell.z + 1 - shop.depth / 2 - layer.inset };
+      return subtractFloorOpenings(rectangle, openings).map(rectangle => ({ ...rectangle, tint: (cell.x + cell.z) % 2 ? 0.97 : 1.03 }));
+    });
+    const batch = new THREE.InstancedMesh(layer.geometry, material(layer.color), pieces.length);
     batch.name = layer.name;
     batch.castShadow = true;
     batch.receiveShadow = true;
-    cells.forEach((cell, index) => {
-      matrix.makeTranslation(cell.x - shop.width / 2 + 0.5, layer.y, cell.z - shop.depth / 2 + 0.5);
+    pieces.forEach((piece, index) => {
+      matrix.makeScale(piece.maxX - piece.minX, 1, piece.maxZ - piece.minZ);
+      matrix.setPosition((piece.minX + piece.maxX) / 2, layer.y, (piece.minZ + piece.maxZ) / 2);
       batch.setMatrixAt(index, matrix);
-      if (layer.name === 'floor-cell-tiles') batch.setColorAt(index, tileColor.clone().multiplyScalar((cell.x + cell.z) % 2 ? 0.97 : 1.03));
+      if (layer.name === 'floor-cell-tiles') batch.setColorAt(index, tileColor.clone().multiplyScalar(piece.tint));
     });
     batch.instanceMatrix.needsUpdate = true;
     if (batch.instanceColor) batch.instanceColor.needsUpdate = true;
@@ -535,7 +541,10 @@ function buildContourFloor(shop: ShopDocument, floor: THREE.Group, slabDepth = 0
     const horizontal = side === 'south';
     const x = (horizontal ? (run.start + run.end) / 2 : run.line) - shop.width / 2;
     const z = (horizontal ? run.line : (run.start + run.end) / 2) - shop.depth / 2;
-    box(floor, horizontal ? length : 0.065, 0.055, horizontal ? 0.065 : length, CREAM, x, 0.032, z, 0.012);
+    const width = horizontal ? length : 0.065, depth = horizontal ? 0.065 : length;
+    for (const piece of subtractFloorOpenings({ minX: x - width / 2, maxX: x + width / 2, minZ: z - depth / 2, maxZ: z + depth / 2 }, openings)) {
+      box(floor, piece.maxX - piece.minX, 0.055, piece.maxZ - piece.minZ, CREAM, (piece.minX + piece.maxX) / 2, 0.032, (piece.minZ + piece.maxZ) / 2, 0.012);
+    }
   }
 }
 
@@ -687,7 +696,7 @@ export function buildEntrance(shop: ShopDocument) {
   return { entrance, doorPivot, doorHit };
 }
 
-export function buildRoom(shop: ShopDocument, options: { slabDepth?: number } = {}) {
+export function buildRoom(shop: ShopDocument, options: { slabDepth?: number; floorOpenings?: readonly FloorOpening[] } = {}) {
   const group = new THREE.Group();
   group.name = 'shop-room';
   const walls = new THREE.Group();
@@ -722,10 +731,10 @@ export function buildRoom(shop: ShopDocument, options: { slabDepth?: number } = 
     return { group, walls, floor, backWall, leftWall, entrance, doorPivot, doorHit, previewDimensions, previewWallItems, hasFloor: false };
   }
 
-  if (customFloor || options.slabDepth !== undefined) {
+  if (customFloor || options.slabDepth !== undefined || options.floorOpenings?.length) {
     // Stacked floors use their exact footprint and a shallower support slab;
     // the broad ground-level foundation would cover the lower entrance canopy.
-    buildContourFloor(shop, floor, options.slabDepth);
+    buildContourFloor(shop, floor, options.slabDepth, options.floorOpenings);
   } else {
   box(floor, w + 0.72, 0.3, d + 1.1, '#d3c4ba', 0, -0.24, 0.16, 0.14);
   box(floor, w + 0.48, 0.09, d + 0.5, '#fff4dc', 0, -0.055, 0, 0.055);
@@ -767,8 +776,17 @@ export function buildRoom(shop: ShopDocument, options: { slabDepth?: number } = 
     previewWallHeight(previewHeight);
   };
 
+  let previewFloorWidth = w, previewFloorDepth = d;
   const previewDimensions = (width: number, depth: number, height: number, entrancePosition = getEntrance(shop).position) => {
-    floor.scale.set(customFloor ? 1 : width / w, 1, customFloor ? 1 : depth / d);
+    const fixedOpenings = Boolean(options.floorOpenings?.length);
+    // The stairs belong to the floor below: resizing this room must not stretch
+    // their opening or move it away from the flight's shared world coordinates.
+    if (fixedOpenings && !customFloor && (width !== previewFloorWidth || depth !== previewFloorDepth)) {
+      const previous = new THREE.Group(); previous.add(...floor.children); disposeGroup(previous);
+      buildContourFloor({ ...shop, width, depth }, floor, options.slabDepth, options.floorOpenings);
+      previewFloorWidth = width; previewFloorDepth = depth;
+    }
+    floor.scale.set(customFloor || fixedOpenings ? 1 : width / w, 1, customFloor || fixedOpenings ? 1 : depth / d);
     backWall.scale.set(customFloor ? 1 : width / w, 1, 1);
     backWall.position.set(0, 0, customFloor ? 0 : (d - depth) / 2);
     leftWall.scale.set(1, 1, customFloor ? 1 : depth / d);
