@@ -151,7 +151,7 @@ Pada lantai 1, pintu masuk juga bisa dipilih dan digeser langsung dari Eksterior
 
 Pilih **Plester** atau **Bata** pada material fasad. Bata mengikuti warna bangunan dan mempertahankan seluruh bukaan. Lampu luar tersedia sebagai **Kap klasik**, **Lentera**, dan **Lampu oval**. Signage memiliki pilihan **Papan kayu**, **Papan toko besar**, serta **Papan menjorok** dengan penyangga. Tulisan, warna, dan ukuran bisa diubah; signage bercahaya mengikuti mode malam.
 
-Akses tangga rooftop bisa **Terbuka** atau **Berdinding & beratap**, dengan bukaan pintu untuk keluar ke teras. Pagar bordes otomatis dipotong pada bagian yang ditempati tangga lantai berikutnya. Ketika kembali ke Genteng, tangga akses rooftop yang disiapkan otomatis ikut dilepas, sedangkan tangga antar-lantai dan perabot teras tetap disimpan.
+Akses tangga rooftop bisa **Terbuka** atau **Berdinding & beratap**, dengan bukaan pintu untuk keluar ke teras. Pagar bordes otomatis dipotong pada bagian yang ditempati tangga lantai berikutnya. Jika tangga atas lebih pendek, bordes penghubung mengisi celah menuju anak tangga pertama dan railing yang menghalangi jalurnya ikut tersambung. Sisi lubang yang masih terbuka tetap berpagar; memindahkan atau menghapus tangga atas mengembalikan railing semula. Ketika kembali ke Genteng, tangga akses rooftop yang disiapkan otomatis ikut dilepas, sedangkan tangga antar-lantai dan perabot teras tetap disimpan.
 
 Kategori **Outdoor** menyediakan **Tenda kanopi** dan **Payung taman**. Panjang, lebar, warna, serta rotasinya bisa diatur. Naungan boleh berada di atas meja, kursi, dan perabot lain; bukaan serta jalur keluar tangga tetap dijaga.
 

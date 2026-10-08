@@ -374,7 +374,7 @@ export class ShopScene {
       lightingContentChanged = true;
       this.renderer.shadowMap.needsUpdate = true;
     }
-    const nextLandingKey = JSON.stringify([activeLevel, next.rooftopOnly, shop.width, shop.depth, shop.floorCells, stairOpenings, shop.items.filter(item => item.kind === 'stairs')]);
+    const nextLandingKey = JSON.stringify([activeLevel, next.rooftopOnly, shop.width, shop.depth, shop.floorCells, shop.floorColor, stairOpenings, shop.items.filter(item => item.kind === 'stairs')]);
     if (this.landingKey !== nextLandingKey) {
       if (this.landings) disposeGroup(this.landings);
       this.landings = next.rooftopOnly ? new THREE.Group() : buildStairLandings(buildingDoc, next.activeLevel ?? 0);
@@ -1798,9 +1798,25 @@ export class ShopScene {
     data.rooftopStairAccess = getRoof(this.state.building ?? this.state.shop).stairAccess ?? 'open';
     let enclosures = 0, guardrails = 0;
     (this.state.exteriorOnly ? this.building : this.rooftop)?.traverse(object => { if (object.name.startsWith('stair-access-enclosure:') && this.isObjectVisible(object)) enclosures++; });
-    this.landings?.traverse(object => { if (object.name === 'stairwell-guardrail' && this.isObjectVisible(object)) guardrails++; });
+    const landingRails: object[] = [], stairBridges: object[] = [];
+    const landingRoot = this.state.exteriorOnly
+      ? this.building?.getObjectByName(`exterior-level:${(this.state.activeLevel ?? 0) + 1}`)?.getObjectByName('stair-landings')
+      : this.landings;
+    landingRoot?.traverse(object => {
+      const rail = ['stairwell-guardrail', 'stairwell-entry-guardrail'].includes(object.name);
+      if ((!rail && object.name !== 'stairwell-entry-bridge') || !this.isObjectVisible(object)) return;
+      const bounds = new THREE.Box3().setFromObject(object);
+      let parent: THREE.Object3D | null = object;
+      while (parent && !parent.userData.stairOpening) parent = parent.parent;
+      const entry = { stairId: parent?.userData.stairOpening.stairId, upperStairId: object.userData.upperStairId,
+        minX: bounds.min.x, maxX: bounds.max.x, minZ: bounds.min.z, maxZ: bounds.max.z };
+      if (rail) { guardrails++; landingRails.push(entry); }
+      else stairBridges.push(entry);
+    });
     data.rooftopEnclosures = String(enclosures);
     data.landingGuardrails = String(guardrails);
+    data.landingRails = JSON.stringify(landingRails);
+    data.stairBridges = JSON.stringify(stairBridges);
     data.showAllWalls = String(!!this.state.showAllWalls);
     const boundaryVisible = (wall?: THREE.Group) => {
       if (!wall?.children.length) return false;
