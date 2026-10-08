@@ -104,9 +104,12 @@ test('exterior facade and both roof styles persist with four-storey camera and v
   await button(page, 'Warna lis fasad 3').click();
   await page.getByLabel('Kanopi toko', { exact: true }).uncheck();
   await button(page, 'Rooftop').click();
-  await page.getByLabel('Taman rooftop', { exact: true }).check();
-  await button(page, 'Warna atap 4').click();
-  await expect.poll(async () => (await saved(page)).roof).toEqual({ style: 'rooftop', color: '#74798A', garden: true });
+  await button(page, 'Tata rooftop').click();
+  await expect(canvas(page)).toHaveAttribute('data-rooftop-only', 'true');
+  expect((await saved(page)).rooftop?.items.length).toBeGreaterThan(0);
+  await button(page, 'Eksterior').click();
+  await button(page, 'Warna lantai rooftop 4').click();
+  await expect.poll(async () => (await saved(page)).rooftop?.floorColor).toBe('#74798A');
   await photo(page, info, 'exterior-rooftop-two');
   await page.getByLabel('Jumlah lantai', { exact: true }).selectOption('4');
   await photo(page, info, 'exterior-rooftop-four');
@@ -128,7 +131,7 @@ test('exterior facade and both roof styles persist with four-storey camera and v
   await expect.poll(() => saved(page)).toEqual(design);
   await button(page, 'Eksterior').click();
   await expect(button(page, 'Rooftop')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByLabel('Taman rooftop', { exact: true })).toBeChecked();
+  await expect(button(page, 'Tata rooftop')).toBeVisible();
   if (info.project.name === 'mobile-chromium') await page.setViewportSize({ width: 320, height: 844 });
   await noOverflow(page);
   expect(errors).toEqual([]);

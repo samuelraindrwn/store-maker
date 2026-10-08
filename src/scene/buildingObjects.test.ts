@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { createEmptyShop, createInitialShop, getFloorCells, getWallHeight, type ShopDocument, type ShopItem } from '../model';
+import { createEmptyShop, createInitialShop, getFloorCells, getRooftopDocument, getWallHeight, type ShopDocument, type ShopItem } from '../model';
 import { buildBuilding, buildingEdges, buildStairLandings, getBuildingBounds, LEVEL_SLAB } from './buildingObjects';
 import { applyItemSize, buildItem, disposeGroup } from './objects';
 
@@ -128,7 +128,7 @@ describe('closed multi-floor exterior', () => {
     } finally { disposeGroup(group); }
   });
 
-  it('switches between pitched tile geometry and a flat parapet roof with optional garden', () => {
+  it('switches between pitched geometry and a terrace whose garden objects are editable furniture', () => {
     const doc = building(2);
     const pitched = buildBuilding({ ...doc, roof: { style: 'tiles', color: '#b86b51', garden: true } });
     const terrace = buildBuilding({ ...doc, roof: { style: 'rooftop', color: '#c8b89a', garden: false } });
@@ -139,8 +139,10 @@ describe('closed multi-floor exterior', () => {
       expect(terrace.getObjectByName('terracotta-roof-tiles')).toBeUndefined();
       expect(named(terrace, 'rooftop-parapet')).toHaveLength(4);
       expect(terrace.getObjectByName('rooftop-garden')).toBeUndefined();
-      expect(garden.getObjectByName('rooftop-pergola')).toBeDefined();
-      expect(named(garden, 'rooftop-greenery')).toHaveLength(4);
+      const gardenDocument = getRooftopDocument({ ...doc, roof: { style: 'rooftop', color: '#c8b89a', garden: true } });
+      expect(gardenDocument.items.length).toBeGreaterThan(0);
+      for (const item of gardenDocument.items) expect(garden.getObjectByName(`item:${item.id}`)).toBeDefined();
+      expect(garden.getObjectByName('rooftop-pergola')).toBeUndefined();
     } finally { [pitched, terrace, garden].forEach(disposeGroup); }
   });
 

@@ -1,11 +1,11 @@
-import { Check, Flower2, Home, Paintbrush, Sun } from 'lucide-react';
-import { getExterior, getRoof, setExterior, setRoof, type ShopDocument } from '../model';
+import { ArrowRight, Check, Home, Paintbrush, Sun } from 'lucide-react';
+import { getExterior, getRoof, getRooftopDocument, replaceRooftopDocument, setExterior, setRoof, type ShopDocument } from '../model';
 
 const FACADES = ['#EADCCA', '#C8D4BE', '#DABAC5', '#BECAD9', '#D8B28E', '#C4B5D9'];
 const TRIMS = ['#847293', '#657B70', '#A77653', '#EEE7D8', '#526478', '#A96665'];
 const ROOFS = ['#B96B51', '#A85C54', '#728475', '#74798A', '#C4A77C', '#827193'];
 
-export default function ExteriorSettings({ building, onChange }: { building: ShopDocument; onChange: (doc: ShopDocument) => void }) {
+export default function ExteriorSettings({ building, onChange, onEditRooftop }: { building: ShopDocument; onChange: (doc: ShopDocument) => void; onEditRooftop: () => void }) {
   const exterior = getExterior(building);
   const roof = getRoof(building);
   return <div className="exterior-settings" data-testid="exterior-settings">
@@ -21,8 +21,8 @@ export default function ExteriorSettings({ building, onChange }: { building: Sho
         <strong>{style === 'tiles' ? 'Genteng' : 'Rooftop'}</strong><small>{style === 'tiles' ? 'Klasik & hangat' : 'Ruang di atas kota'}</small>{roof.style === style && <Check className="roof-check" size={14} />}
       </button>)}
     </div>
-    <ExteriorColors label="atap" colors={ROOFS} value={roof.color} onChange={color => onChange(setRoof(building, { color }))} />
-    {roof.style === 'rooftop' && <label className="building-toggle"><span><Flower2 size={16} /><span>Taman rooftop<small>Pergola dan tanaman hijau.</small></span></span><input type="checkbox" aria-label="Taman rooftop" checked={roof.garden} onChange={event => onChange(setRoof(building, { garden: event.target.checked }))} /></label>}
+    <ExteriorColors label={roof.style === 'rooftop' ? 'lantai rooftop' : 'atap'} colors={ROOFS} value={roof.style === 'rooftop' ? getRooftopDocument(building).floorColor : roof.color} onChange={color => onChange(roof.style === 'rooftop' ? replaceRooftopDocument(building, { ...getRooftopDocument(building), floorColor: color }) : setRoof(building, { color }))} />
+    {roof.style === 'rooftop' && <div className="roof-access-card"><p>Rooftop bisa diisi meja, tanaman, dan perabot. Tangga terhubung dari lantai paling atas.</p><button className="button button-purple full-width" onClick={onEditRooftop}><Sun size={16} />Tata rooftop<ArrowRight size={16} /></button></div>}
     <p className="wall-catalog-note">Pintu dan jendela mengikuti desain Interior. Pindah ke Interior untuk menggeser pintu, memasang jendela, dan menata ruangan.</p>
   </div>;
 }

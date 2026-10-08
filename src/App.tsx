@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Apple, ArrowDownToLine, ArrowLeft, ArrowRight, BookOpen, Building2, Camera, Check, CheckCheck, ChevronDown, CircleHelp, Cookie, Copy, Croissant, Disc3, DoorOpen, Eraser, Expand, Eye, Footprints, GlassWater, Grid2X2, Layers3, Leaf, Maximize2, Moon, MousePointer2, Move, Paintbrush, Plus, Puzzle, Redo2, RotateCcw, RotateCw, Sandwich, Save, Shirt, ShoppingBag, Sparkles, SprayCan, Store, Sun, Trash2, Undo2, Upload, UtensilsCrossed, X } from 'lucide-react';
 import ShopCanvas, { type SceneHandle } from './components/ShopCanvas';
 import FurnitureArt from './components/FurnitureArt';
@@ -8,8 +8,8 @@ import ExteriorSettings from './components/ExteriorSettings';
 import PartitionPanel from './components/PartitionPanel';
 import WallMountPicker, { WALL_SIDE_LABELS, type WallMount } from './components/WallMountPicker';
 import { getPartitions, getEntranceWall, removePartition } from './model';
-import { getLevelCount, getLevelDocument, replaceLevelDocument, setLevelCount, getRoof } from './model';
-import { CATALOG, FOOD_ITEM_KINDS, FOOD_PRODUCTS, canPlace, createBlankShop, createInitialShop, createItem, getAllowedStocks, getEntrance, getFloorBounds, getFloorCells, getItemSize, getItemFootprint, getItemPlacementBounds, getWallHeight, isStandingSign, parseShop, placeItem, removeItem, renameShop, setEntrance, setWallHeight, updateItem, upgradeShop } from './model';
+import { getLevelCount, getLevelDocument, replaceLevelDocument, setLevelCount, getRoof, setRoof, getRooftopDocument, replaceRooftopDocument, canPlaceRooftop, canPlaceLevelItem, ensureRooftopAccess, hasRooftopAccess } from './model';
+import { CATALOG, FOOD_ITEM_KINDS, FOOD_PRODUCTS, createBlankShop, createInitialShop, createItem, getAllowedStocks, getEntrance, getFloorBounds, getFloorCells, getItemSize, getItemFootprint, getItemPlacementBounds, getWallHeight, isStandingSign, parseShop, placeItem, removeItem, renameShop, setEntrance, setWallHeight, updateItem, upgradeShop } from './model';
 import type { ItemKind, ProductKind, Rotation, ShopDocument, ShopItem } from './model';
 import { WALL_CATALOG, WINDOW_STYLES, getWindowStyle, getWallItems, getWallItemSize, getWallRuns, createWallItem, canPlaceWallItem, findWallPlacement, placeWallItem, updateWallItem, removeWallItem } from './model';
 import type { WallItem, WallItemKind, WallSide, WindowStyle } from './model';
@@ -37,6 +37,7 @@ const STOCK: { value: ProductKind; name: string; label: string; icon: typeof Boo
   { value: 'snacks', name: 'Camilan', label: 'camilan', icon: Cookie },
 ];
 const FOOD_ITEMS = new Set<ItemKind>(FOOD_ITEM_KINDS);
+const OUTDOOR_ITEMS = new Set<ItemKind>(['plant', 'dining-table', 'stool', 'lamp', 'rug', 'table', 'coffee-station', 'service-cart']);
 const UTILITY_ITEMS = new Set<ItemKind>(['stairs', 'warehouse-rack', 'toilet', 'washbasin', 'shower']);
 const FOOD_STOCK = new Set<ProductKind>(FOOD_PRODUCTS);
 type History = { past: ShopDocument[]; present: ShopDocument; future: ShopDocument[] };
@@ -56,9 +57,11 @@ export default function App() {
   const building = history.present;
   const levelCount = getLevelCount(building);
   const [requestedLevel, setRequestedLevel] = useState(0);
-  const activeLevel = Math.min(requestedLevel, levelCount - 1);
-  const shop = getLevelDocument(building, activeLevel);
   const [exteriorOnly, setExteriorOnly] = useState(false);
+  const [requestedRooftop, setRequestedRooftop] = useState(false);
+  const rooftopOnly = requestedRooftop && !exteriorOnly && getRoof(building).style === 'rooftop';
+  const activeLevel = rooftopOnly ? levelCount : Math.min(requestedLevel, levelCount - 1);
+  const shop = useMemo(() => rooftopOnly ? getRooftopDocument(building) : getLevelDocument(building, activeLevel), [building, activeLevel, rooftopOnly]);
   const [sceneRevision, setSceneRevision] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [placement, setPlacement] = useState<ShopItem | null>(null);
@@ -69,7 +72,7 @@ export default function App() {
   const [wallPlacement, setWallPlacement] = useState<WallItem | null>(null);
   const [wallPlacementMount, setWallPlacementMount] = useState<WallMount | null>(null);
   const [tab, setTab] = useState<'furniture' | 'room'>(() => getFloorCells(shop).length ? 'furniture' : 'room');
-  const [filter, setFilter] = useState<'all' | 'display' | 'decor' | 'sign' | 'wall' | 'food' | 'utility'>('all');
+  const [filter, setFilter] = useState<'all' | 'display' | 'decor' | 'sign' | 'wall' | 'food' | 'utility' | 'outdoor'>('all');
   const [showGrid, setShowGrid] = useState(() => getFloorCells(shop).length === 0);
   const [showWalls, setShowWalls] = useState(true);
   const [showCity, setShowCity] = useState(true);
@@ -124,6 +127,7 @@ export default function App() {
   useEffect(() => { if (selectedId && !shop.items.some((item) => item.id === selectedId)) setSelectedId(null); }, [shop.items, selectedId]);
   useEffect(() => { if (selectedWallId && !getWallItems(shop).some((item) => item.id === selectedWallId)) setSelectedWallId(null); }, [shop, selectedWallId]);
   useEffect(() => { if (!wallPlacement) setWallPlacementMount(null); }, [wallPlacement]);
+  useEffect(() => { if (!rooftopOnly && filter === 'outdoor') setFilter('all'); }, [rooftopOnly, filter]);
   useEffect(() => { if (selectedPartitionId && !getPartitions(shop).some(wall => wall.id === selectedPartitionId)) setSelectedPartitionId(null); }, [shop, selectedPartitionId]);
   useEffect(() => { setResizeMode(false); }, [selectedId, selectedWallId, selectedDoor, selectedPartitionId, placement, wallPlacement, preview, editMode]);
 
@@ -135,30 +139,50 @@ export default function App() {
   }, []);
   const commit = useCallback((next: ShopDocument | ((doc: ShopDocument) => ShopDocument)) => {
     commitBuilding(current => {
+      if (rooftopOnly) {
+        const floor = getRooftopDocument(current);
+        return replaceRooftopDocument(current, typeof next === 'function' ? next(floor) : next);
+      }
       if (activeLevel >= getLevelCount(current)) return current;
       const index = activeLevel;
       const floor = getLevelDocument(current, index);
       const value = typeof next === 'function' ? next(floor) : next;
       return value === floor ? current : replaceLevelDocument(current, index, value);
     });
-  }, [activeLevel, commitBuilding]);
+  }, [activeLevel, rooftopOnly, commitBuilding]);
+  const canPlaceActive = useCallback((item: ShopItem, ignoreId?: string) => rooftopOnly
+    ? canPlaceRooftop(building, item, ignoreId) : canPlaceLevelItem(building, activeLevel, item, ignoreId), [building, activeLevel, rooftopOnly]);
   const clearSelection = () => {
     setSelectedPartitionId(null);
     setPlacement(null); setWallPlacement(null); setSelectedId(null); setSelectedWallId(null);
     setSelectedDoor(false); setResizeMode(false); setInteraction(null);
   };
   const switchLevel = (index: number) => {
-    clearSelection(); setRequestedLevel(index); setExteriorOnly(false);
+    clearSelection(); setRequestedLevel(index); setRequestedRooftop(false); setExteriorOnly(false);
+    if (filter === 'outdoor') setFilter('all');
     setView('orbit'); setCameraReset(value => value + 1);
   };
+  const switchRooftop = () => {
+    commitBuilding(doc => setRoof(doc, { style: 'rooftop' }));
+    clearSelection(); setRequestedRooftop(true); setExteriorOnly(false);
+    setEditMode('arrange'); setTab('furniture'); setFilter('outdoor');
+    setView('orbit'); setCameraReset(value => value + 1);
+  };
+  const addRoofStairs = () => {
+    const next = ensureRooftopAccess(building);
+    commitBuilding(next);
+    announce(next === building ? 'Belum ada ruang untuk tangga. Kosongkan area di lantai paling atas dan jalur keluarnya di rooftop.' : 'Tangga ke rooftop sudah terpasang.');
+  };
   const switchExterior = (enabled: boolean) => {
+    setRequestedRooftop(false);
+    if (filter === 'outdoor') setFilter('all');
     clearSelection(); setExteriorOnly(enabled); setView('orbit'); setCameraReset(value => value + 1);
     // Reselecting repaints the same renderer; view changes use a loading transition.
     setSceneRevision(value => value + 1);
   };
   const changeLevelCount = (count: number) => {
     const next = setLevelCount(building, count);
-    if (next === building) return;
+    if (next === building) { announce('Perabot rooftop belum muat pada bentuk atap baru. Pindahkan barangnya dulu.'); return; }
     commitBuilding(next); clearSelection(); setRequestedLevel(Math.min(activeLevel, count - 1));
     setCameraReset(value => value + 1);
     announce(count < levelCount ? `Bangunan menjadi ${count} lantai. Lantai yang dihapus bisa dikembalikan dengan Urungkan.` : `${count} lantai siap ditata. Pilih lantainya untuk mulai.`);
@@ -168,7 +192,7 @@ export default function App() {
   const restartShop = (blank: boolean) => {
     const next = blank ? createBlankShop() : createInitialShop();
     if (JSON.stringify(next) !== JSON.stringify(building)) commitBuilding(next);
-    setRequestedLevel(0); setExteriorOnly(false); clearSelection();
+    setRequestedLevel(0); setRequestedRooftop(false); setExteriorOnly(false); clearSelection();
     setResizeMode(false); setPreview(false); setFileMenu(false); setInteraction(null);
     setEditMode(blank ? 'build' : 'arrange'); setBuildTool('add'); setTab(blank ? 'room' : 'furniture'); setFilter('all');
     setShowGrid(blank); setShowWalls(true); setShowCity(true); setView('orbit'); setCameraReset(value => value + 1);
@@ -176,13 +200,17 @@ export default function App() {
     announce(blank ? 'Semua sudah kosong. Klik petak untuk mulai membangun. Bisa diurungkan.' : 'Toko contoh awal kembali. Bisa diurungkan.');
   };
   const commitGesture = useCallback((next: ShopDocument, label?: string) => {
+    if (!rooftopOnly && next !== shop && replaceLevelDocument(building, activeLevel, next) === building) {
+      announce('Perubahan ini mengenai perabot rooftop. Pindahkan barang di rooftop dulu.');
+      return;
+    }
     commit(next);
     if (label) announce(label);
-  }, [commit, announce]);
+  }, [commit, announce, rooftopOnly, shop, building, activeLevel]);
   const changeMode = (mode: 'arrange' | 'build') => {
     setSelectedPartitionId(null);
     setExteriorOnly(false);
-    setEditMode(mode); setTab(mode === 'build' ? 'room' : 'furniture');
+    setEditMode(rooftopOnly ? 'arrange' : mode); setTab(mode === 'build' ? 'room' : 'furniture');
     setPlacement(null); setSelectedId(null); setWallPlacement(null); setSelectedWallId(null); setSelectedDoor(false);
     if (mode === 'build') setShowWalls(true);
   };
@@ -197,7 +225,7 @@ export default function App() {
   const updateSelected = (patch: Partial<ShopItem>) => {
     if (!selected) return;
     if (Object.entries(patch).every(([key, value]) => selected[key as keyof ShopItem] === value)) return;
-    const next = updateItem(shop, selected.id, patch);
+    const next = canPlaceActive({ ...selected, ...patch }, selected.id) ? updateItem(shop, selected.id, patch) : shop;
     if (next === shop) announce('Belum muat di sini. Pindahkan ke area yang lebih lega.');
     else commit(next);
   };
@@ -205,10 +233,11 @@ export default function App() {
     if (wallPlacement || selectedWallId) return;
     if (placement) { setPlacement({ ...placement, rotation: ((placement.rotation + 90) % 360) as Rotation }); return; }
     if (!selected) return;
-    const next = updateItem(shop, selected.id, { rotation: ((selected.rotation + 90) % 360) as Rotation });
+    const candidate = { ...selected, rotation: ((selected.rotation + 90) % 360) as Rotation };
+    const next = canPlaceActive(candidate, selected.id) ? updateItem(shop, selected.id, candidate) : shop;
     if (next === shop) announce('Belum bisa diputar di sini. Geser ke area yang lebih lega.');
     else commit(next);
-  }, [placement, selected, shop, commit, announce, wallPlacement, selectedWallId]);
+  }, [placement, selected, shop, commit, announce, wallPlacement, selectedWallId, canPlaceActive]);
   const deleteSelected = useCallback(() => {
     if (selectedPartitionId) { commit(removePartition(shop, selectedPartitionId)); setSelectedPartitionId(null); return; }
     if (selectedWallId) {
@@ -232,6 +261,10 @@ export default function App() {
 
   const startPlacement = (kind: ItemKind, clone?: ShopItem) => {
     setSelectedPartitionId(null);
+    if (rooftopOnly && !getFloorCells(shop).length) {
+      switchLevel(levelCount - 1); setEditMode('build'); setBuildTool('add'); setTab('room'); setShowGrid(true);
+      announce('Bangun lantai paling atas dulu. Luas rooftop akan mengikuti lantai ini.'); return;
+    }
     if (!getFloorCells(shop).length) { changeMode('build'); setBuildTool('add'); setShowGrid(true); announce('Gambar lantainya dulu. Klik atau sapu petak transparan.'); return; }
     setEditMode('arrange'); setWallPlacement(null); setSelectedWallId(null); setSelectedDoor(false);
     const item = clone ? { ...clone, id: createItem(kind).id } : createItem(kind);
@@ -240,7 +273,7 @@ export default function App() {
     const rows = Array.from({ length: bounds.maxZ - bounds.minZ + 1 }, (_, i) => bounds.minZ + i);
     if (isStandingSign(kind)) rows.sort((a, b) => Number(b > floorBounds.maxZ) - Number(a > floorBounds.maxZ) || a - b);
     for (const z of rows) for (let x = bounds.minX; x <= bounds.maxX && !free; x++) {
-      const candidate = { ...item, x, z }; if (canPlace(shop, candidate)) free = candidate;
+      const candidate = { ...item, x, z }; if (canPlaceActive(candidate)) free = candidate;
     }
     if (!free) { announce('Ruangnya penuh. Hapus barang atau perbesar ruangan dulu.'); return; }
     setPlacement(free); setSelectedId(null); setShowGrid(true);
@@ -248,11 +281,11 @@ export default function App() {
   const placeAt = useCallback((x: number, z: number) => {
     if (!placement || preview) return;
     const candidate = { ...placement, x, z };
-    if (!canPlace(shop, candidate, moving ? placement.id : undefined)) { announce(isStandingSign(candidate.kind) ? 'Pilih petak kosong di lantai atau trotoar depan toko.' : 'Ada barang lain atau melewati lantai. Coba petak yang kosong.'); return; }
+    if (!canPlaceActive(candidate, moving ? placement.id : undefined)) { announce(rooftopOnly ? 'Pilih petak kosong di rooftop dan sisakan jalur tangga.' : isStandingSign(candidate.kind) ? 'Pilih petak kosong di lantai atau trotoar depan toko.' : 'Ada barang lain atau melewati lantai. Coba petak yang kosong.'); return; }
     const next = moving ? updateItem(shop, placement.id, { x, z, rotation: placement.rotation }) : placeItem(shop, candidate);
     commit(next); setSelectedId(candidate.id); setPlacement(null);
     announce(moving ? 'Posisinya sudah pas.' : `${CATALOG.find((entry) => entry.kind === candidate.kind)?.name} ditambahkan.`);
-  }, [placement, shop, moving, preview, commit, announce]);
+  }, [placement, shop, moving, preview, commit, announce, rooftopOnly, canPlaceActive]);
   const hoverCell = useCallback((cell: { x: number; z: number } | null) => {
     if (!cell) return;
     setPlacement((item) => item && (item.x !== cell.x || item.z !== cell.z) ? { ...item, x: cell.x, z: cell.z } : item);
@@ -335,7 +368,7 @@ export default function App() {
     try {
       if (file.size > 1_000_000) throw new Error();
       const doc = parseShop(JSON.parse(await file.text())); if (!doc) throw new Error();
-      commitBuilding(upgradeShop(doc)); setRequestedLevel(0); setExteriorOnly(false); clearSelection(); setFileMenu(false); setView('orbit'); setCameraReset(value => value + 1);
+      commitBuilding(upgradeShop(doc)); setRequestedLevel(0); setRequestedRooftop(false); setExteriorOnly(false); clearSelection(); setFileMenu(false); setView('orbit'); setCameraReset(value => value + 1);
       if (!getFloorCells(doc).length) { setEditMode('build'); setBuildTool('add'); setTab('room'); setShowGrid(true); setPreview(false); setView('orbit'); setCameraReset(value => value + 1); }
       announce('Desain berhasil dibuka. Selamat melanjutkan!');
     } catch { announce('File tidak valid. Pilih file desain JSON hasil simpan dari Store Maker.'); }
@@ -343,7 +376,8 @@ export default function App() {
   };
   const setCamera = (next: typeof view) => { setView(next); scene.current?.setView(next); };
   const displayedCatalog = CATALOG.filter((entry) => {
-    if (entry.kind === 'bathroom') return false;
+    if (entry.kind === 'bathroom' || (rooftopOnly && entry.kind === 'stairs')) return false;
+    if (filter === 'outdoor') return OUTDOOR_ITEMS.has(entry.kind);
     const dedicatedFood = FOOD_ITEMS.has(entry.kind) && entry.kind !== 'counter' && entry.kind !== 'stool';
     if (filter === 'all') return true;
     if (filter === 'utility') return UTILITY_ITEMS.has(entry.kind);
@@ -352,7 +386,7 @@ export default function App() {
     if (filter === 'decor') return !entry.stockable && !dedicatedFood && !UTILITY_ITEMS.has(entry.kind);
     return filter === 'sign' && isStandingSign(entry.kind);
   });
-  const showWallCatalog = filter === 'all' || filter === 'wall';
+  const showWallCatalog = !rooftopOnly && (filter === 'all' || filter === 'wall');
 
   return <div className={`app-shell ${preview ? 'is-preview' : ''}`}>
     <header className="main-header">
@@ -373,13 +407,14 @@ export default function App() {
 
       <div className="building-navigation" aria-label="Bangunan dan lantai">
         <div className="building-view-switch" role="group" aria-label="Tampilan bangunan">
-          <button className={!exteriorOnly ? 'active' : ''} aria-pressed={!exteriorOnly} onClick={() => switchExterior(false)}><Layers3 size={16} />Interior</button>
+          <button className={!exteriorOnly && !rooftopOnly ? 'active' : ''} aria-pressed={!exteriorOnly && !rooftopOnly} onClick={() => switchExterior(false)}><Layers3 size={16} />Interior</button>
           <button className={exteriorOnly ? 'active' : ''} aria-pressed={exteriorOnly} onClick={() => switchExterior(true)}><Building2 size={16} />Eksterior</button>
         </div>
         <div className="floor-navigation" role="group" aria-label="Pilih lantai">
           {Array.from({ length: levelCount }, (_, index) => <button key={index} className={!exteriorOnly && activeLevel === index ? 'active' : ''} aria-label={`Edit lantai ${index + 1}`} aria-pressed={!exteriorOnly && activeLevel === index} onClick={() => switchLevel(index)}><span>LT</span> {index + 1}</button>)}
+          <button className={rooftopOnly ? 'active' : ''} aria-label="Edit rooftop" aria-pressed={rooftopOnly} onClick={switchRooftop}><Sun size={14} /> Rooftop</button>
         </div>
-        <span className="building-view-note">{exteriorOnly ? 'Seluruh bangunan, dari luar.' : `Menata lantai ${activeLevel + 1} dari ${levelCount}.`}</span>
+        <span className="building-view-note">{exteriorOnly ? 'Seluruh bangunan, dari luar.' : rooftopOnly ? `Area outdoor di atas lantai ${levelCount}.` : `Menata lantai ${activeLevel + 1} dari ${levelCount}.`}</span>
         {!preview && <label className="floor-count-field"><span>Jumlah lantai</span><select aria-label="Jumlah lantai" value={levelCount} onChange={event => changeLevelCount(Number(event.target.value))}>{[1, 2, 3, 4].map(count => <option key={count} value={count}>{count} lantai</option>)}</select></label>}
       </div>
       <div className={`builder-layout ${exteriorOnly ? 'exterior-layout' : ''}`}>
@@ -390,9 +425,10 @@ export default function App() {
             <button className="button button-light clear-shop-button" onClick={() => restartShop(true)}><Eraser size={15} /><span>Kosongkan semua</span></button>
             <p>Kosongkan semua menghapus barang, lantai, dinding, dan pintu. Keduanya bisa diurungkan.</p>
           </div>
-          {exteriorOnly ? <ExteriorSettings building={building} onChange={commitBuilding} /> : tab === 'furniture' ? <>
-            <div className="library-heading"><h2>Mulai dari yang kamu suka.</h2><p>Barang kecil, karakter besar.</p></div>
-            <div className="category-tabs" aria-label="Kategori perabot"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Semua</button><button className={filter === 'display' ? 'active' : ''} onClick={() => setFilter('display')}>Pajangan</button><button className={filter === 'food' ? 'active' : ''} onClick={() => setFilter('food')}>Toko makanan</button><button className={filter === 'utility' ? 'active' : ''} onClick={() => setFilter('utility')}>Gudang & utilitas</button><button className={filter === 'decor' ? 'active' : ''} onClick={() => setFilter('decor')}>Dekor</button><button className={filter === 'sign' ? 'active' : ''} onClick={() => setFilter('sign')}>Papan</button><button className={filter === 'wall' ? 'active' : ''} onClick={() => setFilter('wall')}>Dinding</button></div>
+          {exteriorOnly ? <ExteriorSettings building={building} onChange={commitBuilding} onEditRooftop={switchRooftop} /> : tab === 'furniture' ? <>
+            <div className="library-heading"><h2>{rooftopOnly ? <>Santai di atas kota.</> : <>Mulai dari yang kamu suka.</>}</h2><p>{rooftopOnly ? 'Tambah meja, tempat duduk, tanaman, dan barang favoritmu.' : 'Barang kecil, karakter besar.'}</p></div>
+            {rooftopOnly && <div className="category-tabs"><button className={filter === 'outdoor' ? 'active' : ''} onClick={() => setFilter('outdoor')}>Outdoor</button></div>}
+            <div className="category-tabs" aria-label="Kategori perabot"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Semua</button><button className={filter === 'display' ? 'active' : ''} onClick={() => setFilter('display')}>Pajangan</button><button className={filter === 'food' ? 'active' : ''} onClick={() => setFilter('food')}>Toko makanan</button><button className={filter === 'utility' ? 'active' : ''} onClick={() => setFilter('utility')}>Gudang & utilitas</button><button className={filter === 'decor' ? 'active' : ''} onClick={() => setFilter('decor')}>Dekor</button><button className={filter === 'sign' ? 'active' : ''} onClick={() => setFilter('sign')}>Papan</button>{!rooftopOnly && <button className={filter === 'wall' ? 'active' : ''} onClick={() => setFilter('wall')}>Dinding</button>}</div>
             <div className="catalog-grid">{displayedCatalog.map((entry) => <button key={entry.kind} className={`catalog-card ${placement?.kind === entry.kind && !moving ? 'active' : ''}`} aria-label={`Tambah ${entry.name}`} data-testid={`catalog-${entry.kind}`} onClick={() => startPlacement(entry.kind)}><span className="catalog-plus"><Plus size={13} /></span><FurnitureArt kind={entry.kind} color={entry.color} /><strong>{entry.name}</strong><span>{entry.width} × {entry.depth} petak</span></button>)}{showWallCatalog && WALL_CATALOG.map((entry) => <button key={entry.kind} className={`catalog-card ${wallPlacement?.kind === entry.kind && !movingWall ? 'active' : ''}`} aria-label={`Tambah ${entry.name}`} data-testid={`catalog-${entry.kind}`} onClick={() => startWallPlacement(entry.kind)}><span className="catalog-plus"><Plus size={13} /></span><WallArt kind={entry.kind} color={entry.color} /><strong>{entry.name}</strong><span>Tempel di dinding</span></button>)}</div>
             {filter === 'wall' && <p className="wall-catalog-note">Pilih aksesori, lalu klik dinding. Seret untuk mengatur posisi dan tingginya.</p>}
             {filter === 'utility' && <p className="wall-catalog-note">Tata toilet, wastafel, dan shower satu per satu. Bagi ruangnya lewat Ruangan → Tembok dalam; pilih lantai sebelum menata tangga atau rak gudang.</p>}
@@ -400,7 +436,12 @@ export default function App() {
             {filter === 'sign' && <p className="wall-catalog-note">Sambut pengunjung dengan papan pilihanmu. Taruh di lantai atau trotoar depan, lalu seret dan putar sesukamu.</p>}
             <div className="inventory-picker"><label className="field-label" htmlFor="inventory-select">BARANG DI TOKOMU</label><select id="inventory-select" aria-label="Pilih barang di toko" value={selectedWallId ? `wall:${selectedWallId}` : selectedId ?? ''} onChange={(e) => e.target.value.startsWith('wall:') ? selectWallItem(e.target.value.slice(5)) : selectItem(e.target.value || null)}><option value="">Pilih barang ({shop.items.length + wallItems.length})</option><optgroup label="Di lantai">{shop.items.map((item, i) => <option key={item.id} value={item.id}>{CATALOG.find((entry) => entry.kind === item.kind)?.name} · {i + 1}</option>)}</optgroup><optgroup label="Di dinding">{wallItems.map((item, i) => <option key={item.id} value={`wall:${item.id}`}>{WALL_CATALOG.find((entry) => entry.kind === item.kind)?.name} · {i + 1}</option>)}</optgroup></select></div>
             <div className="library-note"><Sparkles size={17} /><p>Nggak ada benar atau salah.<br /><strong>Yang penting, kamu banget.</strong></p></div>
-          </> : <div className="room-settings">
+          </> : rooftopOnly ? <div className="room-settings">
+            <div className="library-heading"><h2>Teras di atas toko.</h2><p>Luas rooftop mengikuti lantai paling atas.</p></div>
+            <label className="field-label spaced">WARNA LANTAI ROOFTOP</label><ColorPicker colors={FLOOR_COLORS} value={shop.floorColor} label="lantai rooftop" onChange={color => commit({ ...shop, floorColor: color })} />
+            <p className="stock-note">Bukaan tangga dan pagar tepi mengikuti bangunan. Tata perabot lewat Isi toko.</p>
+            <button className="button button-light full-width" onClick={() => switchLevel(levelCount - 1)}>Ke lantai {levelCount}<ArrowRight size={16} /></button>
+          </div> : <div className="room-settings">
             <div className="library-heading"><h2>Petak kecil.<br />Bentuk sesukamu.</h2><p>Bentuk L, sudut kecil, atau teras baru.</p></div>
             <div className="drag-tip"><Grid2X2 size={19} /><p>Klik atau sapu petak transparan.<br /><strong>Dinding mengikuti bentuk lantai.</strong></p></div>
             <div className="floor-summary"><span className="floor-mini-grid" aria-hidden="true"><i/><i/><i/><i/><i/><i/></span><div><strong>{floorCount} petak lantai</strong><span>Setiap petak punya kemungkinan.</span></div></div>
@@ -416,16 +457,16 @@ export default function App() {
 
         <div className="scene-workspace">
           {!preview && !exteriorOnly && <div className="scene-toolbar" role="region" aria-label="Pengaturan editor" data-testid="scene-toolbar">
-            {!preview && !placement && !wallPlacement && <div className="edit-mode-switch" aria-label="Mode editor"><button className={editMode === 'arrange' ? 'active' : ''} aria-label="Atur barang" aria-pressed={editMode === 'arrange'} onClick={() => changeMode('arrange')}><MousePointer2 size={15} />Atur barang</button><button className={editMode === 'build' ? 'active' : ''} aria-label="Bangun ruangan" aria-pressed={editMode === 'build'} onClick={() => changeMode('build')}><Expand size={15} />Bangun</button></div>}
-            {!preview && editMode === 'build' && !placement && !wallPlacement && <div className="build-tool-switch" aria-label="Alat bentuk ruangan"><button className={buildTool === 'add' ? 'active' : ''} aria-label="Tambah lantai" aria-pressed={buildTool === 'add'} onClick={() => { clearSelection(); setBuildTool('add'); }}><Plus size={14} />Lantai</button><button className={buildTool === 'erase' ? 'active' : ''} aria-label="Hapus lantai" aria-pressed={buildTool === 'erase'} onClick={() => { clearSelection(); setBuildTool('erase'); }}><Eraser size={14} />Hapus</button><button className={buildTool === 'walls' ? 'active' : ''} aria-label="Atur dinding dan pintu" aria-pressed={buildTool === 'walls'} onClick={() => { clearSelection(); setBuildTool('walls'); }}><DoorOpen size={14} />{activeLevel === 0 ? 'Dinding & pintu' : 'Dinding'}</button><button className={buildTool === 'partition' ? 'active' : ''} aria-label="Tembok dalam" aria-pressed={buildTool === 'partition'} onClick={drawPartition}><Grid2X2 size={14} />Sekat</button></div>}
+            {!preview && !rooftopOnly && !placement && !wallPlacement && <div className="edit-mode-switch" aria-label="Mode editor"><button className={editMode === 'arrange' ? 'active' : ''} aria-label="Atur barang" aria-pressed={editMode === 'arrange'} onClick={() => changeMode('arrange')}><MousePointer2 size={15} />Atur barang</button><button className={editMode === 'build' ? 'active' : ''} aria-label="Bangun ruangan" aria-pressed={editMode === 'build'} onClick={() => changeMode('build')}><Expand size={15} />Bangun</button></div>}
+            {!preview && !rooftopOnly && editMode === 'build' && !placement && !wallPlacement && <div className="build-tool-switch" aria-label="Alat bentuk ruangan"><button className={buildTool === 'add' ? 'active' : ''} aria-label="Tambah lantai" aria-pressed={buildTool === 'add'} onClick={() => { clearSelection(); setBuildTool('add'); }}><Plus size={14} />Lantai</button><button className={buildTool === 'erase' ? 'active' : ''} aria-label="Hapus lantai" aria-pressed={buildTool === 'erase'} onClick={() => { clearSelection(); setBuildTool('erase'); }}><Eraser size={14} />Hapus</button><button className={buildTool === 'walls' ? 'active' : ''} aria-label="Atur dinding dan pintu" aria-pressed={buildTool === 'walls'} onClick={() => { clearSelection(); setBuildTool('walls'); }}><DoorOpen size={14} />{activeLevel === 0 ? 'Dinding & pintu' : 'Dinding'}</button><button className={buildTool === 'partition' ? 'active' : ''} aria-label="Tembok dalam" aria-pressed={buildTool === 'partition'} onClick={drawPartition}><Grid2X2 size={14} />Sekat</button></div>}
             {!preview && !placement && !wallPlacement && <div className="gesture-hint" data-testid="gesture-hint"><span className="tiny-spark">✦</span>{resizeMode ? 'Seret ujungnya atau klik petak tujuan.' : editMode === 'build' ? buildTool === 'partition' ? 'Seret garis petak untuk membuat tembok. Klik tembok untuk memasang pintu.' : buildTool === 'walls' ? activeLevel === 0 ? 'Tarik tinggi dinding atau geser pintu masuk.' : 'Tarik pegangan untuk mengatur tinggi dinding.' : buildTool === 'erase' ? 'Sapu petak untuk menghapus. Barang tetap aman.' : 'Klik atau sapu petak transparan untuk membangun.' : selectedDoor ? 'Seret pintu untuk pindah. Buka atau tutup lewat panel.' : 'Seret barang atau pintu untuk memindahkannya.'}</div>}
             {placement && <div className="placement-banner"><span className="placement-indicator" /><div><strong>{moving ? 'Pindahkan' : 'Letakkan'} {CATALOG.find((entry) => entry.kind === placement.kind)?.name}</strong><span>{isStandingSign(placement.kind) ? 'Klik lantai atau trotoar depan toko.' : 'Klik petak kosong di lantai.'}</span></div><button className="icon-button" aria-label="Putar barang" title="Putar (R)" onClick={rotate}><RotateCw size={18} /></button><button className="icon-button" aria-label="Batalkan penempatan" title="Batal (Esc)" onClick={() => setPlacement(null)}><X size={18} /></button></div>}
             {wallPlacement && <div className="placement-banner wall-placement-banner"><span className="placement-indicator" /><div><strong>{movingWall ? 'Pindahkan' : 'Pasang'} {WALL_CATALOG.find((entry) => entry.kind === wallPlacement.kind)?.name}</strong><span>{wallPlacementMount ? `Pasang pada sisi ${WALL_SIDE_LABELS[wallPlacementMount.wall].toLowerCase()}. Hijau berarti posisinya pas.` : "Pilih sisi di atas kanvas, lalu klik dinding."}</span></div><button className="icon-button" aria-label="Batalkan penempatan aksesori" title="Batal (Esc)" onClick={() => setWallPlacement(null)}><X size={18} /></button></div>}
           </div>}
           <section className={`scene-panel ${placement || wallPlacement ? 'is-placing' : ''} ${editMode === 'build' && !preview ? 'is-building' : ''} ${showCity ? 'with-city' : ''} ${nightMode ? 'is-night' : ''}`} data-testid="scene" aria-label="Toko 3D interaktif">
-            <div className="scene-topline"><span className="scene-badge">{nightMode ? <Moon size={12} /> : <span className="live-dot" />}{exteriorOnly ? 'EKSTERIOR TOKOMU' : nightMode ? 'MALAM DI TOKOMU' : preview ? 'TOKOMU, VERSI KAMU' : 'RUANG KREATIF'}</span><span className="scene-dimensions">{exteriorOnly ? levelCount : floorCount}<span>{exteriorOnly ? ' LANTAI' : ` PETAK / LT ${activeLevel + 1}`}</span></span></div>
+            <div className="scene-topline"><span className="scene-badge">{nightMode ? <Moon size={12} /> : <span className="live-dot" />}{exteriorOnly ? 'EKSTERIOR TOKOMU' : rooftopOnly ? 'ROOFTOP TOKOMU' : nightMode ? 'MALAM DI TOKOMU' : preview ? 'TOKOMU, VERSI KAMU' : 'RUANG KREATIF'}</span><span className="scene-dimensions">{exteriorOnly ? levelCount : floorCount}<span>{exteriorOnly ? ' LANTAI' : rooftopOnly ? ' PETAK / ROOFTOP' : ` PETAK / LT ${activeLevel + 1}`}</span></span></div>
             {wallPlacement && !preview && !exteriorOnly && <WallMountPicker shop={shop} item={wallPlacement} mount={wallPlacementMount} onChoose={chooseWallSide} onAuto={() => setWallPlacementMount(null)} />}
-            <ShopCanvas ref={scene} revision={sceneRevision} shop={shop} building={building} activeLevel={activeLevel} exteriorOnly={exteriorOnly} selectedId={selectedId} placement={placement} selectedWallId={selectedWallId} selectedDoor={selectedDoor} wallPlacement={wallPlacement} wallPlacementMount={wallPlacementMount} resizeMode={resizeMode} showGrid={showGrid && !preview} showWalls={showWalls} showCity={showCity} nightMode={nightMode} editMode={editMode} buildTool={buildTool} preview={preview} onSelect={selectItem} onSelectWall={selectWallItem} onSelectDoor={selectDoor} selectedPartitionId={selectedPartitionId} onSelectPartition={selectPartition} onCell={placeAt} onHover={hoverCell} onWallPlace={placeWallAt} onWallHover={hoverWall} onChange={commitGesture} onInteraction={setInteraction} />
+            <ShopCanvas ref={scene} revision={sceneRevision} shop={shop} building={building} activeLevel={activeLevel} rooftopOnly={rooftopOnly} exteriorOnly={exteriorOnly} selectedId={selectedId} placement={placement} selectedWallId={selectedWallId} selectedDoor={selectedDoor} wallPlacement={wallPlacement} wallPlacementMount={wallPlacementMount} resizeMode={resizeMode} showGrid={showGrid && !preview} showWalls={showWalls} showCity={showCity} nightMode={nightMode} editMode={editMode} buildTool={buildTool} preview={preview} onSelect={selectItem} onSelectWall={selectWallItem} onSelectDoor={selectDoor} selectedPartitionId={selectedPartitionId} onSelectPartition={selectPartition} onCell={placeAt} onHover={hoverCell} onWallPlace={placeWallAt} onWallHover={hoverWall} onChange={commitGesture} onInteraction={setInteraction} />
             {interaction && !preview && <div className="interaction-hud" aria-live="off"><Move size={16} /><span>{interaction}</span><kbd>Esc</kbd></div>}
             {preview && <div className="preview-label"><span className="eyebrow">DIBUAT DENGAN SEDIKIT IMAJINASI</span><h2>{building.name || 'Toko Kecilku'}</h2><div className="preview-actions"><button className="button button-dark" onClick={takePhoto}><Camera size={16} />Ambil foto toko</button>{!exteriorOnly && activeLevel === 0 && floorCount > 0 && <button className="button button-light" aria-label={entrance.open ? 'Tutup pintu masuk' : 'Buka pintu masuk'} onClick={() => commit(setEntrance(shop, { open: !entrance.open }))}><DoorOpen size={16} />{entrance.open ? 'Tutup pintu' : 'Buka pintu'}</button>}</div></div>}
             <div className="scene-controls">
@@ -438,7 +479,7 @@ export default function App() {
                 <button className={`icon-button night-mode-toggle ${nightMode ? 'active' : ''}`} aria-label="Mode malam" aria-pressed={nightMode} onClick={() => setNightMode(!nightMode)} title={nightMode ? 'Mode malam · klik untuk siang' : 'Mode siang · klik untuk malam'}>{nightMode ? <Moon size={17} /> : <Sun size={17} />}</button>
                 <button className={`icon-button ${showCity ? 'active' : ''}`} aria-label="Tampilkan lingkungan kota" aria-pressed={showCity} onClick={() => setShowCity(!showCity)} title="Lingkungan kota"><Building2 size={17} /></button>
                 <button className={`icon-button ${showGrid ? 'active' : ''}`} aria-label="Tampilkan petak" aria-pressed={showGrid} onClick={() => setShowGrid(!showGrid)} title="Petak lantai" disabled={preview || exteriorOnly}><Grid2X2 size={17} /></button>
-                <button className={`icon-button ${showWalls ? 'active' : ''}`} aria-label="Tampilkan dinding" aria-pressed={showWalls} onClick={() => setShowWalls(!showWalls)} title="Dinding" disabled={exteriorOnly}><Layers3 size={17} /></button>
+                <button className={`icon-button ${showWalls ? 'active' : ''}`} aria-label="Tampilkan dinding" aria-pressed={showWalls} onClick={() => setShowWalls(!showWalls)} title="Dinding" disabled={exteriorOnly || rooftopOnly}><Layers3 size={17} /></button>
                 <span className="control-separator" /><button className="icon-button" aria-label="Reset kamera" title="Reset kamera" onClick={() => { scene.current?.resetCamera(); setView('orbit'); }}><Maximize2 size={17} /></button>
               </div>
             </div>
@@ -499,8 +540,20 @@ export default function App() {
           </> : placement ? <>
             <span className="eyebrow">SATU IDE BARU</span><div className="selected-art"><FurnitureArt kind={placement.kind} color={placement.color} /></div><h2>Carikan tempatnya.</h2><p className="muted">{isStandingSign(placement.kind) ? 'Klik lantai atau trotoar depan untuk meletakkan papan.' : 'Klik lantai untuk meletakkan barang.'} Bayangan hijau berarti tempatnya pas.</p>
             {placementFootprint && <p className="object-size-summary" aria-label="Ukuran barang yang diletakkan">Jejak lantai {placementFootprint.width} × {placementFootprint.depth} petak</p>}
-            <div className="placement-manual"><label className="field-label">ATAU PILIH PETAK</label><div className="position-fields"><label>X<select aria-label="Petak X" value={Math.max(placementBounds.minX, Math.min(placementBounds.maxX, placement.x))} onChange={(e) => setPlacement({ ...placement, x: Number(e.target.value) })}>{positionsX.map((i) => <option key={i} value={i}>{i + 1}</option>)}</select></label><label>Y<select aria-label="Petak Y" value={Math.max(placementBounds.minZ, Math.min(placementBounds.maxZ, placement.z))} onChange={(e) => setPlacement({ ...placement, z: Number(e.target.value) })}>{positionsZ.map((i) => <option key={i} value={i}>{i + 1}</option>)}</select></label></div><button className="button button-purple full-width" disabled={!canPlace(shop, placement, moving ? placement.id : undefined)} onClick={() => placeAt(placement.x, placement.z)}>Letakkan di sini<Check size={15} /></button><button className="button button-light full-width" onClick={rotate}><RotateCw size={15} />Putar 90°</button><button className="text-button full-width" onClick={() => setPlacement(null)}>Batal</button></div>
-          </> : <>
+            <div className="placement-manual"><label className="field-label">ATAU PILIH PETAK</label><div className="position-fields"><label>X<select aria-label="Petak X" value={Math.max(placementBounds.minX, Math.min(placementBounds.maxX, placement.x))} onChange={(e) => setPlacement({ ...placement, x: Number(e.target.value) })}>{positionsX.map((i) => <option key={i} value={i}>{i + 1}</option>)}</select></label><label>Y<select aria-label="Petak Y" value={Math.max(placementBounds.minZ, Math.min(placementBounds.maxZ, placement.z))} onChange={(e) => setPlacement({ ...placement, z: Number(e.target.value) })}>{positionsZ.map((i) => <option key={i} value={i}>{i + 1}</option>)}</select></label></div><button className="button button-purple full-width" disabled={!canPlaceActive(placement, moving ? placement.id : undefined)} onClick={() => placeAt(placement.x, placement.z)}>Letakkan di sini<Check size={15} /></button><button className="button button-light full-width" onClick={rotate}><RotateCw size={15} />Putar 90°</button><button className="text-button full-width" onClick={() => setPlacement(null)}>Batal</button></div>
+          </> : rooftopOnly ? <div className="rooftop-guide" data-testid="rooftop-guide">
+            <span className="eyebrow">RUANG TERBUKA PUNYAMU</span>
+            <div className="rooftop-illustration"><Sun size={56} strokeWidth={1.3} /></div>
+            <h2>Ngopi sambil<br />menikmati kota.</h2>
+            <p className="muted">Pilih barang, taruh, lalu geser di rooftop. Lantai di bawah tetap terlihat samar.</p>
+            <div className="roof-access-card">
+              <span className="field-label">AKSES KE ROOFTOP</span>
+              <p>{hasRooftopAccess(building) ? `Tangga tersambung dari lantai ${levelCount}. Bukaan dan jalur keluar tetap kosong.` : `Tambahkan tangga dari lantai ${levelCount} untuk naik ke sini.`}</p>
+              {!hasRooftopAccess(building) && <button className="button button-purple full-width" aria-label="Tambah tangga ke rooftop" onClick={addRoofStairs}><Plus size={16} />Tambah tangga ke rooftop</button>}
+              <button className="button button-light full-width" onClick={() => switchLevel(levelCount - 1)}>Ke lantai {levelCount}<ArrowRight size={16} /></button>
+            </div>
+            <p className="local-note"><CheckCheck size={13} />Perabot rooftop ikut tersimpan.</p>
+          </div> : <>
             <span className="eyebrow">INI DUNIA KECILMU</span><div className="welcome-illustration"><span className="welcome-orbit orbit-one" /><span className="welcome-orbit orbit-two" /><Store size={48} strokeWidth={1.35} /><span className="illustration-spark">✦</span><span className="illustration-dot" /></div><h2>Tokonya kamu.<br />Ceritanya juga.</h2><p className="muted">Toko buku di sudut kota?<br />Atau tempat barang unik ketemu pemilik baru?</p>
             <ol className="steps"><li><span>1</span><div><strong>Pilih, taruh, geser</strong><p>Seret barang langsung di dalam toko.</p></div></li><li><span>2</span><div><strong>Bentuk ruang sesukamu</strong><p>Pilih Bangun, lalu sapu petak lantainya.</p></div></li><li><span>3</span><div><strong>Atur pintu masuk</strong><p>Seret untuk pindah. Klik untuk melihat pengaturannya.</p></div></li></ol>
             <div className="shop-stat"><span><strong>{shop.items.length + wallItems.length}</strong> sentuhan kecil</span><span className="stat-flower">✳</span></div><p className="local-note"><CheckCheck size={13} />Tersimpan di browser ini.</p>

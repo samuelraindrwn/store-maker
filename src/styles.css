@@ -155,9 +155,12 @@
 .building-view-switch{display:flex;gap:3px;padding:3px;border-radius:10px;background:#f0ebf5}
 .building-view-switch button{display:flex;align-items:center;justify-content:center;gap:7px;min-height:39px;padding:8px 14px;border-radius:8px;background:transparent;color:#776287;font-size:12px;font-weight:800}
 .building-view-switch button.active{background:#7652cf;color:white;box-shadow:0 2px 6px #7750a822}
-.floor-navigation{display:flex;align-items:center;gap:5px}
+.floor-navigation{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
 .floor-navigation button{min-width:45px;min-height:39px;padding:7px 9px;border:1px solid #e8e0ed;border-radius:9px;background:#f9f6fb;color:#7a6a86;font-size:14px;font-weight:800}
 .floor-navigation button span{font-size:9px;font-weight:700}.floor-navigation button.active{background:#ede4f8;border-color:#ab8cd1;color:#70479c}
+.floor-navigation button{display:inline-flex;align-items:center;justify-content:center;gap:4px}
+.roof-access-card{margin:22px 0;padding:16px;background:#f4eff8;border:1px solid #e4d9ed;border-radius:13px;color:#796789;font-size:12px;line-height:1.7}
+.roof-access-card .button{margin-top:10px;white-space:normal}.rooftop-illustration{display:grid;place-items:center;height:140px;color:#ad94cd}
 .building-view-note{font-size:11px;color:#7a6b84}.floor-count-field{display:flex;align-items:center;gap:10px;margin-left:auto;font-size:11px;font-weight:700;color:#756481}
 .floor-count-field select{min-height:39px;padding:8px 27px 8px 10px;border:1px solid #ded3e8;border-radius:9px;background:#fff;color:#69517c;font:inherit}
 .exterior-settings .library-heading{margin-top:23px}.exterior-settings .library-heading h2{font-size:24px;line-height:1.3;margin:9px 0}.exterior-settings .eyebrow{font-size:8px;letter-spacing:1.15px}

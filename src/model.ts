@@ -69,10 +69,13 @@ export interface ShopDocument {
   /** Floors above the ground floor, ordered from level two through four. */
   upperFloors?: ShopDocument[]
   roof?: RoofDesign
+  /** Furniture on the outdoor deck above the top interior floor. */
+  rooftop?: RooftopDesign
   exterior?: ExteriorDesign
 }
 
 export interface RoofDesign { style: 'tiles' | 'rooftop'; color: string; garden: boolean }
+export interface RooftopDesign { items: ShopItem[]; floorColor: string }
 export interface ExteriorDesign { wallColor: string; trimColor: string; awning: boolean }
 export const MAX_LEVELS = 4
 
@@ -157,7 +160,7 @@ const optionalItemKeys = ['width', 'depth'] as const
 const allowedItemKeys = [...itemKeys, ...optionalItemKeys] as const
 const documentKeys = ['version', 'name', 'width', 'depth', 'wallColor', 'floorColor', 'items'] as const
 const optionalDocumentKeys = ['wallHeight', 'entrance', 'floorCells', 'wallItems', 'partitions', 'interiorDoors'] as const
-const buildingDocumentKeys = ['upperFloors', 'roof', 'exterior'] as const
+const buildingDocumentKeys = ['upperFloors', 'roof', 'rooftop', 'exterior'] as const
 const wallItemKeys = ['id', 'kind', 'wall', 'line', 'offset', 'height', 'color', 'text', 'lit'] as const
 const optionalWallItemKeys = ['width', 'sizeHeight', 'windowStyle'] as const
 const allowedWallItemKeys = [...wallItemKeys, ...optionalWallItemKeys] as const
@@ -168,7 +171,7 @@ const MAX_INTERIOR_DOORS = 80
 const partitionKeys = ['id', 'axis', 'line', 'start', 'end', 'color'] as const
 const interiorDoorKeys = ['id', 'wallId', 'offset', 'width', 'color', 'open'] as const
 const wallSides: readonly WallSide[] = ['back', 'left', 'front', 'right']
-const MAX_JSON_LENGTH = 128_000 * MAX_LEVELS
+const MAX_JSON_LENGTH = 128_000 * (MAX_LEVELS + 1)
 const own = (object: object, key: PropertyKey) => Object.prototype.hasOwnProperty.call(object, key)
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -860,6 +863,141 @@ export function getRoof(doc: ShopDocument): RoofDesign {
   return doc.roof ? { ...doc.roof } : { style: 'tiles', color: '#B96B51', garden: false }
 }
 
+function rooftopFloor(doc: ShopDocument, rooftop: RooftopDesign): ShopDocument {
+  const top = getLevelDocument(doc, getLevelCount(doc) - 1)
+  return {
+    version: 2, name: doc.name, width: top.width, depth: top.depth,
+    floorColor: rooftop.floorColor, wallColor: getExterior(doc).wallColor,
+    floorCells: getFloorCells(top), items: rooftop.items.map(item => ({ ...item })),
+    wallItems: [], partitions: [], interiorDoors: [],
+  }
+}
+
+/** The roof follows the top storey's footprint; it never counts as another storey. */
+export function getRooftopDocument(doc: ShopDocument): ShopDocument {
+  const rooftop = doc.rooftop ?? (getRoof(doc).garden ? starterRooftop(doc) : { items: [], floorColor: '#D9CBB6' })
+  return rooftopFloor(doc, rooftop)
+}
+
+/** Reserve the entire flight and a clear tile at its upper exit. */
+function rooftopStairBounds(stairs: ShopItem) {
+  const size = getItemFootprint(stairs)
+  return {
+    minX: stairs.x - (stairs.rotation === 270 ? 1 : 0),
+    maxX: stairs.x + size.width + (stairs.rotation === 90 ? 1 : 0),
+    minZ: stairs.z - (stairs.rotation === 0 ? 1 : 0),
+    maxZ: stairs.z + size.depth + (stairs.rotation === 180 ? 1 : 0),
+  }
+}
+
+function supportsRooftopExit(top: ShopDocument, stairs: ShopItem): boolean {
+  const reserved = rooftopStairBounds(stairs)
+  for (let x = reserved.minX; x < reserved.maxX; x++) for (let z = reserved.minZ; z < reserved.maxZ; z++) {
+    if (!hasFloorCell(top, x, z)) return false
+  }
+  return true
+}
+
+/** A stair at the edge without a supported upper landing is not usable access. */
+export function hasRooftopAccess(doc: ShopDocument): boolean {
+  const top = getLevelDocument(doc, getLevelCount(doc) - 1)
+  return top.items.some(item => item.kind === 'stairs' && supportsRooftopExit(top, item))
+}
+
+export function canPlaceRooftop(doc: ShopDocument, item: ShopItem, ignoreId?: string): boolean {
+  if (!isItem(item) || item.kind === 'stairs') return false
+  const roof = getRooftopDocument(doc)
+  if (!canPlace(roof, item, ignoreId)) return false
+  const size = getItemFootprint(item)
+  // Standing signs may use a sidewalk downstairs, but never float off the deck.
+  for (let x = item.x; x < item.x + size.width; x++) for (let z = item.z; z < item.z + size.depth; z++) {
+    if (!hasFloorCell(roof, x, z)) return false
+  }
+  const top = getLevelDocument(doc, getLevelCount(doc) - 1)
+  return top.items.filter(other => other.kind === 'stairs').every(stairs => {
+    const reserved = rooftopStairBounds(stairs)
+    return item.x + size.width <= reserved.minX || item.x >= reserved.maxX
+      || item.z + size.depth <= reserved.minZ || item.z >= reserved.maxZ
+  })
+}
+
+function parseRooftop(value: unknown, building: ShopDocument): RooftopDesign | null {
+  if (!isRecord(value) || !exactKeys(value, ['items', 'floorColor']) || !isColor(value.floorColor)
+    || !Array.isArray(value.items) || value.items.length > MAX_ITEMS) return null
+  const rooftop: RooftopDesign = { items: [], floorColor: value.floorColor }
+  const candidate = { ...building, rooftop }
+  for (const item of value.items) {
+    if (!isItem(item) || !canPlaceRooftop(candidate, item)) return null
+    rooftop.items.push({ ...item })
+  }
+  return rooftop
+}
+
+function validRooftop(doc: ShopDocument): boolean {
+  return !doc.rooftop || parseRooftop(doc.rooftop, doc) !== null
+}
+
+/** Preview the same cross-level constraints that a committed floor edit enforces. */
+export function canPlaceLevelItem(doc: ShopDocument, level: number, item: ShopItem, ignoreId?: string): boolean {
+  if (!Number.isInteger(level) || level < 0 || level >= getLevelCount(doc)) return false
+  const floor = getLevelDocument(doc, level)
+  if (!canPlace(floor, item, ignoreId)) return false
+  if (!doc.rooftop || level !== getLevelCount(doc) - 1 || item.kind !== 'stairs') return true
+  const nextFloor = { ...floor, items: [...floor.items.filter(other => other.id !== ignoreId), item] }
+  const candidate = level === 0 ? { ...doc, items: nextFloor.items }
+    : { ...doc, upperFloors: doc.upperFloors!.map((other, index) => index === level - 1 ? nextFloor : other) }
+  return validRooftop(candidate)
+}
+
+/** Furniture and deck finish are editable; supporting contours stay with the floor below. */
+export function replaceRooftopDocument(doc: ShopDocument, next: ShopDocument): ShopDocument {
+  const current = getRooftopDocument(doc)
+  if (next.width !== current.width || next.depth !== current.depth
+    || JSON.stringify(getFloorCells(next)) !== JSON.stringify(current.floorCells)
+    || (next.wallItems?.length ?? 0) || (next.partitions?.length ?? 0) || (next.interiorDoors?.length ?? 0)) return doc
+  const rooftop = parseRooftop({ items: next.items, floorColor: next.floorColor }, doc)
+  if (!rooftop || (doc.rooftop && JSON.stringify(doc.rooftop) === JSON.stringify(rooftop))) return doc
+  return { ...doc, rooftop }
+}
+
+function starterRooftop(doc: ShopDocument): RooftopDesign {
+  const rooftop: RooftopDesign = { items: [], floorColor: '#D9CBB6' }
+  const candidate = { ...doc, rooftop }
+  const bounds = getFloorBounds(getRooftopDocument(candidate))
+  const add = (id: string, kind: ItemKind, x: number, z: number) => {
+    const item = { ...createItem(kind), id, x, z }
+    if (canPlaceRooftop(candidate, item)) rooftop.items.push(item)
+  }
+  const tableX = Math.max(bounds.minX, bounds.maxX - 3)
+  const tableZ = Math.max(bounds.minZ, bounds.maxZ - 3)
+  add('roof-table', 'dining-table', tableX, tableZ)
+  add('roof-seat-a', 'stool', tableX - 1, tableZ)
+  add('roof-seat-b', 'stool', tableX + 2, tableZ + 1)
+  add('roof-plant-a', 'plant', bounds.maxX, bounds.minZ)
+  add('roof-plant-b', 'plant', bounds.maxX, bounds.maxZ)
+  return rooftop
+}
+
+/** Add an accessible flight when space permits, retaining every authored object. */
+export function ensureRooftopAccess(doc: ShopDocument): ShopDocument {
+  const index = getLevelCount(doc) - 1
+  const top = getLevelDocument(doc, index)
+  if (hasRooftopAccess(doc)) return doc
+  const stairs = { ...createItem('stairs'), depth: 4 }
+  const lowerStairs = index > 0 ? getLevelDocument(doc, index - 1).items.find(item => item.kind === 'stairs') : undefined
+  const candidates: ShopItem[] = lowerStairs ? [{ ...stairs, x: lowerStairs.x, z: lowerStairs.z, rotation: lowerStairs.rotation }] : []
+  const bounds = getFloorBounds(top)
+  for (const depth of [4, 3]) for (const rotation of [0, 90, 180, 270] as const) {
+    for (let z = bounds.minZ; z <= bounds.maxZ; z++) for (let x = bounds.minX; x <= bounds.maxX; x++) candidates.push({ ...stairs, x, z, rotation, depth })
+  }
+  for (const item of candidates) {
+    if (!supportsRooftopExit(top, item) || !canPlace(top, item)) continue
+    const next = replaceLevelDocument(doc, index, placeItem(top, item))
+    if (next !== doc) return next
+  }
+  return doc
+}
+
 export function getExterior(doc: ShopDocument): ExteriorDesign {
   return doc.exterior ? { ...doc.exterior } : { wallColor: '#EADCCA', trimColor: '#847293', awning: true }
 }
@@ -868,8 +1006,15 @@ export function setRoof(doc: ShopDocument, patch: Partial<RoofDesign>): ShopDocu
   if (!isRecord(patch) || Reflect.ownKeys(patch).some(key => key !== 'style' && key !== 'color' && key !== 'garden')) return doc
   const current = getRoof(doc)
   const roof = { ...current, ...patch }
-  if (!isRoofDesign(roof) || (current.style === roof.style && current.color === roof.color && current.garden === roof.garden)) return doc
-  return { ...doc, roof }
+  if (!isRoofDesign(roof)) return doc
+  const unchanged = current.style === roof.style && current.color === roof.color && current.garden === roof.garden
+  if (unchanged) return doc
+  let result: ShopDocument = { ...doc, roof }
+  if (roof.style === 'rooftop') {
+    if (current.style !== 'rooftop') result = ensureRooftopAccess(result)
+    if (!result.rooftop) result = { ...result, rooftop: starterRooftop(result) }
+  }
+  return result
 }
 
 export function setExterior(doc: ShopDocument, patch: Partial<ExteriorDesign>): ShopDocument {
@@ -884,6 +1029,7 @@ function floorOnly(doc: ShopDocument): ShopDocument {
   const result = { ...doc }
   delete result.upperFloors
   delete result.roof
+  delete result.rooftop
   delete result.exterior
   return result
 }
@@ -894,11 +1040,11 @@ export function replaceLevelDocument(doc: ShopDocument, index: number, next: Sho
   if (getLevelDocument(doc, index) === next) return doc
   const floor = parseFloor(floorOnly(next), false)
   if (!floor) return doc
-  if (index === 0) {
-    return { ...floor, ...(doc.upperFloors ? { upperFloors: doc.upperFloors } : {}),
-      ...(doc.roof ? { roof: doc.roof } : {}), ...(doc.exterior ? { exterior: doc.exterior } : {}) }
-  }
-  return { ...doc, upperFloors: doc.upperFloors!.map((level, i) => i === index - 1 ? floor : level) }
+  const result = index === 0
+    ? { ...floor, ...(doc.upperFloors ? { upperFloors: doc.upperFloors } : {}),
+      ...(doc.roof ? { roof: doc.roof } : {}), ...(doc.rooftop ? { rooftop: doc.rooftop } : {}), ...(doc.exterior ? { exterior: doc.exterior } : {}) }
+    : { ...doc, upperFloors: doc.upperFloors!.map((level, i) => i === index - 1 ? floor : level) }
+  return validRooftop(result) ? result : doc
 }
 
 function addConnectingStairs(lower: ShopDocument, upper: ShopDocument, preferred?: ShopItem): ShopDocument {
@@ -943,7 +1089,8 @@ export function setLevelCount(doc: ShopDocument, count: number): ShopDocument {
   const result = { ...doc, items: floors[0].items }
   if (count === 1) delete result.upperFloors
   else result.upperFloors = floors.slice(1)
-  return result
+  if (!validRooftop(result)) return doc
+  return getRoof(result).style === 'rooftop' ? ensureRooftopAccess(result) : result
 }
 
 /** Materialize the old fixed sidewalk decoration once, without replacing saved items. */
@@ -1142,5 +1289,10 @@ function parseFloor(value: unknown, allowBuilding: boolean): ShopDocument | null
     }
     if (isRoofDesign(value.roof)) result.roof = { ...value.roof }
     if (isExteriorDesign(value.exterior)) result.exterior = { ...value.exterior }
+    if (own(value, 'rooftop')) {
+      const rooftop = parseRooftop(value.rooftop, result)
+      if (!rooftop) return null
+      result.rooftop = rooftop
+    }
     return result
 }

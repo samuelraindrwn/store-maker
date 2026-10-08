@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { getExterior, getFloorBounds, getFloorCells, getItemFootprint, getLevelCount, getLevelDocument, getRoof, getWallHeight, getWallItems, wallItemPosition, type ShopDocument } from '../model';
-import { applyWallItemSize, box, buildItem, buildRoom, buildWallItem, disposeGroup } from './objects';
+import { getExterior, getFloorBounds, getFloorCells, getItemFootprint, getLevelCount, getLevelDocument, getRoof, getRooftopDocument, getWallHeight, getWallItems, wallItemPosition, type ShopDocument } from '../model';
+import { applyWallItemSize, box, buildContourFloor, buildItem, buildRoom, buildWallItem, disposeGroup } from './objects';
 import { getItemSupport } from './itemSupport';
 import { buildStairwellRims, getStairOpenings } from './stairGeometry';
 
@@ -28,7 +28,8 @@ export function getBuildingBounds(building: ShopDocument) {
     height += getWallHeight(floor) + LEVEL_SLAB;
   }
   const roof = getRoof(building), topWidth = getFloorBounds(getLevelDocument(building, count - 1)).width;
-  height += roof.style === 'tiles' ? Math.min(2.1, topWidth * 0.26) : roof.garden ? 2 : 0.8;
+  // The terrace can hold the whole furniture catalog, including tall racks.
+  height += roof.style === 'tiles' ? Math.min(2.1, topWidth * 0.26) : getRooftopDocument(building).items.length ? 2.8 : 0.84;
   return { minX, maxX, minZ, maxZ, width: maxX - minX, depth: maxZ - minZ, centerX: (minX + maxX) / 2, centerZ: (minZ + maxZ) / 2, height };
 }
 
@@ -73,75 +74,77 @@ function edgeFrame(shop: ShopDocument, edge: Edge) {
   return group;
 }
 
-function planter(parent: THREE.Group, x: number, z: number) {
-  box(parent, 0.63, 0.38, 0.63, '#be9272', x, 0.23, z);
-  box(parent, 0.69, 0.075, 0.69, '#d3b18e', x, 0.4, z);
-  box(parent, 0.54, 0.025, 0.54, '#776348', x, 0.442, z);
-  const leaves = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 1), new THREE.MeshStandardMaterial({ color: '#84a078', roughness: 0.9 }));
-  leaves.name = 'rooftop-greenery'; leaves.position.set(x, 0.79, z); leaves.scale.y = 1.2; leaves.castShadow = true; parent.add(leaves);
+/** Shared editor/exterior deck, at the same local elevation as an upstairs room. */
+export function buildRooftopStructure(building: ShopDocument) {
+  const shop = getRooftopDocument(building), facade = getExterior(building);
+  const group = new THREE.Group(); group.name = 'rooftop-structure';
+  const floor = new THREE.Group(); floor.name = 'rooftop-floor'; floor.userData.interaction = 'floor';
+  // Every slab and paving layer is cut by the actual flight below. A solid roof
+  // backing would otherwise hide the staircase even if the tiles had a hole.
+  buildContourFloor(shop, floor, LEVEL_SLAB, getStairOpenings(building, getLevelCount(building)));
+  group.add(floor);
+  const parapets = new THREE.Group(); parapets.name = 'rooftop-parapets'; group.add(parapets);
+  for (const edge of buildingEdges(shop)) {
+    const rail = edgeFrame(shop, edge), length = edge.end - edge.start;
+    box(rail, length + 0.08, 0.66, 0.14, facade.wallColor, 0, 0.37, 0).name = 'rooftop-parapet';
+    box(rail, length + 0.15, 0.08, 0.23, facade.trimColor, 0, 0.74, 0).name = 'rooftop-parapet-cap';
+    parapets.add(rail);
+  }
+  group.add(buildStairwellRims(building, getLevelCount(building)));
+  return group;
 }
 
-function buildRoof(building: ShopDocument, shop: ShopDocument, base: number) {
+function buildAuthoredRooftop(building: ShopDocument, base: number) {
+  const shop = getRooftopDocument(building), group = new THREE.Group();
+  group.name = 'rooftop-terrace'; group.position.y = base; group.userData.roofStyle = 'rooftop';
+  group.add(buildRooftopStructure(building));
+  for (const item of shop.items) {
+    const object = buildItem(item), footprint = getItemFootprint(item);
+    object.position.set(item.x - shop.width / 2 + footprint.width / 2, 0.038, item.z - shop.depth / 2 + footprint.depth / 2);
+    object.rotation.y = -THREE.MathUtils.degToRad(item.rotation);
+    group.add(object);
+  }
+  return group;
+}
+
+function buildTiledRoof(building: ShopDocument, shop: ShopDocument, base: number) {
   const roof = getRoof(building), facade = getExterior(building), group = new THREE.Group();
-  group.name = roof.style === 'tiles' ? 'tiled-roof' : 'rooftop-terrace'; group.position.y = base; group.userData.roofStyle = roof.style;
+  group.name = 'tiled-roof'; group.position.y = base; group.userData.roofStyle = roof.style;
   const cells = getFloorCells(shop), bounds = getFloorBounds(shop), edges = buildingEdges(shop);
-  tileSlab(group, shop, roof.style === 'rooftop' ? roof.color : facade.trimColor, 0.02, 0.15, 'roof-slab');
+  tileSlab(group, shop, facade.trimColor, 0.02, 0.15, 'roof-slab');
   if (!cells.length) return group;
-  if (roof.style === 'tiles') {
-    const center = bounds.minX + bounds.width / 2, slope = Math.min(0.52, 2.1 / Math.max(1, bounds.width / 2));
-    const roofY = (x: number) => 0.19 + (bounds.width / 2 - Math.abs(x - center)) * slope;
-    const geometry = new THREE.BoxGeometry(0.267 / Math.cos(Math.atan(slope)), 0.085, 0.36);
-    const tiles = new THREE.InstancedMesh(geometry, new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85 }), cells.length * 12);
-    tiles.name = 'terracotta-roof-tiles'; tiles.castShadow = true; tiles.receiveShadow = true;
-    const dummy = new THREE.Object3D(), tint = new THREE.Color(roof.color); let index = 0;
-    for (const cell of cells) for (let col = 0; col < 4; col++) for (let row = 0; row < 3; row++) {
-      const x = cell.x + (col + 0.5) / 4;
-      dummy.position.set(x - shop.width / 2, roofY(x), cell.z + (row + 0.5) / 3 - shop.depth / 2);
-      dummy.rotation.z = (x < center ? 1 : -1) * Math.atan(slope); dummy.updateMatrix(); tiles.setMatrixAt(index, dummy.matrix);
-      tiles.setColorAt(index++, tint.clone().multiplyScalar(0.89 + ((cell.x * 7 + cell.z * 11 + col + row + 1000) % 5) * 0.046));
-    }
-    tiles.instanceMatrix.needsUpdate = true; tiles.instanceColor!.needsUpdate = true; tiles.computeBoundingSphere(); group.add(tiles);
-    // Close the gable under each exposed contour edge, including notches.
-    for (const edge of edges) {
-      const horizontal = edge.side === 'north' || edge.side === 'south', length = edge.end - edge.start;
-      const panel = new THREE.Shape(); panel.moveTo(-length / 2, 0.04); panel.lineTo(length / 2, 0.04);
-      if (horizontal) {
-        panel.lineTo(length / 2, roofY(edge.end));
-        if (center > edge.start && center < edge.end) panel.lineTo(center - (edge.start + edge.end) / 2, roofY(center));
-        panel.lineTo(-length / 2, roofY(edge.start));
-      } else { panel.lineTo(length / 2, roofY(edge.line)); panel.lineTo(-length / 2, roofY(edge.line)); }
-      panel.closePath();
-      const gable = new THREE.Mesh(new THREE.ExtrudeGeometry(panel, { depth: 0.075, bevelEnabled: false }), new THREE.MeshStandardMaterial({ color: facade.wallColor, roughness: 0.88 }));
-      gable.name = 'roof-gable'; gable.castShadow = true;
-      // North/west flip the local along axis; reflect asymmetric gables to match the slope.
-      if (edge.side === 'north') gable.scale.x = -1;
-      const edgeGroup = edgeFrame(shop, edge); edgeGroup.add(gable); group.add(edgeGroup);
-    }
-    for (let z = bounds.minZ; z <= bounds.maxZ; z++) {
-      if (!cells.some(cell => cell.z === z && cell.x <= center && cell.x + 1 >= center)) continue;
-      box(group, 0.21, 0.15, 1.04, roof.color, center - shop.width / 2, roofY(center) + 0.025, z + 0.5 - shop.depth / 2, 0.035).name = 'roof-ridge-cap';
-    }
-  } else {
-    tileSlab(group, shop, roof.color, 0.115, 0.045, 'rooftop-paving');
-    for (const edge of edges) {
-      const rail = edgeFrame(shop, edge), length = edge.end - edge.start;
-      box(rail, length + 0.08, 0.66, 0.14, facade.wallColor, 0, 0.43, 0).name = 'rooftop-parapet';
-      box(rail, length + 0.15, 0.08, 0.23, facade.trimColor, 0, 0.8, 0).name = 'rooftop-parapet-cap'; group.add(rail);
-    }
-    if (roof.garden) {
-      const garden = new THREE.Group(); garden.name = 'rooftop-garden'; garden.position.y = 0.14; group.add(garden);
-      const occupied = new Set(cells.map(cell => `${cell.x},${cell.z}`));
-      const corners = cells.filter(cell => [bounds.minX, bounds.maxX].includes(cell.x) && [bounds.minZ, bounds.maxZ].includes(cell.z));
-      corners.forEach(cell => planter(garden, cell.x + 0.5 - shop.width / 2, cell.z + 0.5 - shop.depth / 2));
-      const origin = cells.find(cell => [0, 1].every(dx => [0, 1].every(dz => occupied.has(`${cell.x + dx},${cell.z + dz}`))));
-      if (origin) {
-        const pergola = new THREE.Group(); pergola.name = 'rooftop-pergola'; pergola.position.set(origin.x + 1 - shop.width / 2, 0, origin.z + 1 - shop.depth / 2); garden.add(pergola);
-        for (const x of [-0.78, 0.78]) for (const z of [-0.78, 0.78]) box(pergola, 0.09, 1.75, 0.09, '#b19774', x, 0.875, z);
-        for (let i = 0; i < 7; i++) box(pergola, 0.13, 0.09, 1.9, '#c8ad88', -0.87 + i * 0.29, 1.80, 0);
-        box(pergola, 1.30, 0.12, 0.46, '#c8ab89', 0, 0.45, -0.5).name = 'rooftop-bench';
-        for (const x of [-0.49, 0.49]) box(pergola, 0.1, 0.4, 0.38, '#ae9270', x, 0.2, -0.5);
-      }
-    }
+  const center = bounds.minX + bounds.width / 2, slope = Math.min(0.52, 2.1 / Math.max(1, bounds.width / 2));
+  const roofY = (x: number) => 0.19 + (bounds.width / 2 - Math.abs(x - center)) * slope;
+  const geometry = new THREE.BoxGeometry(0.267 / Math.cos(Math.atan(slope)), 0.085, 0.36);
+  const tiles = new THREE.InstancedMesh(geometry, new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85 }), cells.length * 12);
+  tiles.name = 'terracotta-roof-tiles'; tiles.castShadow = true; tiles.receiveShadow = true;
+  const dummy = new THREE.Object3D(), tint = new THREE.Color(roof.color); let index = 0;
+  for (const cell of cells) for (let col = 0; col < 4; col++) for (let row = 0; row < 3; row++) {
+    const x = cell.x + (col + 0.5) / 4;
+    dummy.position.set(x - shop.width / 2, roofY(x), cell.z + (row + 0.5) / 3 - shop.depth / 2);
+    dummy.rotation.z = (x < center ? 1 : -1) * Math.atan(slope); dummy.updateMatrix(); tiles.setMatrixAt(index, dummy.matrix);
+    tiles.setColorAt(index++, tint.clone().multiplyScalar(0.89 + ((cell.x * 7 + cell.z * 11 + col + row + 1000) % 5) * 0.046));
+  }
+  tiles.instanceMatrix.needsUpdate = true; tiles.instanceColor!.needsUpdate = true; tiles.computeBoundingSphere(); group.add(tiles);
+  // Close the gable under each exposed contour edge, including notches.
+  for (const edge of edges) {
+    const horizontal = edge.side === 'north' || edge.side === 'south', length = edge.end - edge.start;
+    const panel = new THREE.Shape(); panel.moveTo(-length / 2, 0.04); panel.lineTo(length / 2, 0.04);
+    if (horizontal) {
+      panel.lineTo(length / 2, roofY(edge.end));
+      if (center > edge.start && center < edge.end) panel.lineTo(center - (edge.start + edge.end) / 2, roofY(center));
+      panel.lineTo(-length / 2, roofY(edge.start));
+    } else { panel.lineTo(length / 2, roofY(edge.line)); panel.lineTo(-length / 2, roofY(edge.line)); }
+    panel.closePath();
+    const gable = new THREE.Mesh(new THREE.ExtrudeGeometry(panel, { depth: 0.075, bevelEnabled: false }), new THREE.MeshStandardMaterial({ color: facade.wallColor, roughness: 0.88 }));
+    gable.name = 'roof-gable'; gable.castShadow = true;
+    // North/west flip the local along axis; reflect asymmetric gables to match the slope.
+    if (edge.side === 'north') gable.scale.x = -1;
+    const edgeGroup = edgeFrame(shop, edge); edgeGroup.add(gable); group.add(edgeGroup);
+  }
+  for (let z = bounds.minZ; z <= bounds.maxZ; z++) {
+    if (!cells.some(cell => cell.z === z && cell.x <= center && cell.x + 1 >= center)) continue;
+    box(group, 0.21, 0.15, 1.04, roof.color, center - shop.width / 2, roofY(center) + 0.025, z + 0.5 - shop.depth / 2, 0.035).name = 'roof-ridge-cap';
   }
   return group;
 }
@@ -193,14 +196,16 @@ export function buildBuilding(building: ShopDocument, options: { showCity?: bool
   const group = new THREE.Group(); group.name = 'shop-building-exterior';
   const count = getLevelCount(building), base = getLevelBaseY(building, count);
   for (let level = 0; level < count; level++) group.add(buildAuthoredLevel(building, level, { ...options, exterior: true }));
-  group.add(buildRoof(building, getLevelDocument(building, count - 1), base - LEVEL_SLAB));
+  group.add(getRoof(building).style === 'rooftop'
+    ? buildAuthoredRooftop(building, base)
+    : buildTiledRoof(building, getLevelDocument(building, count - 1), base - LEVEL_SLAB));
   group.userData.levelCount = count; group.userData.buildingHeight = base;
   return group;
 }
 
 /** Faint, inert lower floors establish height without obstructing the active editor. */
 export function buildInteriorContext(building: ShopDocument, activeLevel: number, options: { showCity?: boolean; opacity?: number } = {}) {
-  if (!Number.isInteger(activeLevel) || activeLevel < 0 || activeLevel >= getLevelCount(building)) throw new RangeError('Invalid floor index');
+  if (!Number.isInteger(activeLevel) || activeLevel < 0 || activeLevel > getLevelCount(building)) throw new RangeError('Invalid floor index');
   const group = new THREE.Group(); group.name = 'interior-lower-floor-context';
   const opacity = Number.isFinite(options.opacity) ? THREE.MathUtils.clamp(options.opacity!, 0, 1) : 0.2;
   const stairOpacity = Math.max(opacity, 0.65), materials = new Set<THREE.Material>();

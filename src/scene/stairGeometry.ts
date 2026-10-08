@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getFloorCells, getItemFootprint, getItemSize, getLevelCount, getLevelDocument, type ShopDocument } from '../model';
+import { getFloorCells, getItemFootprint, getItemSize, getLevelCount, getLevelDocument, getRooftopDocument, type ShopDocument } from '../model';
 
 export interface FloorOpening { minX: number; maxX: number; minZ: number; maxZ: number }
 export interface StairOpening extends FloorOpening {
@@ -33,8 +33,9 @@ export function subtractFloorOpenings(rectangle: FloorOpening, openings: readonl
 
 /** Derive stairwells from the flight below, without changing saved floor cells. */
 export function getStairOpenings(building: ShopDocument, activeLevel: number): StairOpening[] {
-  if (activeLevel <= 0 || activeLevel >= getLevelCount(building)) return [];
-  const lower = getLevelDocument(building, activeLevel - 1), current = getLevelDocument(building, activeLevel);
+  const count = getLevelCount(building);
+  if (!Number.isInteger(activeLevel) || activeLevel <= 0 || activeLevel > count) return [];
+  const lower = getLevelDocument(building, activeLevel - 1), current = activeLevel === count ? getRooftopDocument(building) : getLevelDocument(building, activeLevel);
   const cells = getFloorCells(current).map(cell => ({ minX: cell.x - current.width / 2, maxX: cell.x + 1 - current.width / 2, minZ: cell.z - current.depth / 2, maxZ: cell.z + 1 - current.depth / 2 }));
   return lower.items.filter(item => item.kind === 'stairs').flatMap(item => {
     const size = getItemSize(item), footprint = getItemFootprint(item);
@@ -56,8 +57,9 @@ export function getStairOpenings(building: ShopDocument, activeLevel: number): S
 /** A rim and three open guard rails make the actual void legible, never cover it. */
 export function buildStairwellRims(building: ShopDocument, activeLevel: number) {
   const group = new THREE.Group(); group.name = 'stair-landings';
-  if (activeLevel <= 0 || activeLevel >= getLevelCount(building)) return group;
-  const current = getLevelDocument(building, activeLevel), openings = getStairOpenings(building, activeLevel);
+  const count = getLevelCount(building);
+  if (!Number.isInteger(activeLevel) || activeLevel <= 0 || activeLevel > count) return group;
+  const current = activeLevel === count ? getRooftopDocument(building) : getLevelDocument(building, activeLevel), openings = getStairOpenings(building, activeLevel);
   const cells = getFloorCells(current).map(cell => ({ minX: cell.x - current.width / 2, maxX: cell.x + 1 - current.width / 2, minZ: cell.z - current.depth / 2, maxZ: cell.z + 1 - current.depth / 2 }));
   const addBox = (parent: THREE.Group, name: string, rectangle: FloorOpening, height: number, y: number, color: string) => {
     const geometry = new THREE.BoxGeometry(rectangle.maxX - rectangle.minX, height, rectangle.maxZ - rectangle.minZ);

@@ -9,9 +9,9 @@ import { intersectWall, intersectWallPlane, wallFrame } from './interactionWalls
 import { ObjectResizeTools, resizeFloorEdge, resizeFloorToTile, resizeWallEdge, resizeWallToTile, type ResizeEdge } from './interactionObjectResize';
 import { getItemSupport } from './itemSupport';
 import { NightLighting } from './lighting';
-import { buildBuilding, buildInteriorContext, buildStairLandings, getBuildingBounds, getLevelBaseY, LEVEL_SLAB } from './buildingObjects';
+import { buildBuilding, buildInteriorContext, buildRooftopStructure, buildStairLandings, getBuildingBounds, getLevelBaseY, LEVEL_SLAB } from './buildingObjects';
 import { getStairOpenings } from './stairGeometry';
-import { getLevelCount, getLevelDocument, getRoof } from '../model';
+import { canPlaceLevelItem, canPlaceRooftop, getLevelCount, getLevelDocument, getRoof, getRooftopDocument } from '../model';
 import { canPlacePartition, getEntranceWall, getInteriorDoors, getPartitions, getPartitionPosition, placePartition, wallIsHorizontal, type PartitionWall, type WallSide } from '../model';
 
 export type Cell = { x: number; z: number };
@@ -21,6 +21,7 @@ export type SceneState = {
   building?: ShopDocument;
   activeLevel?: number;
   exteriorOnly?: boolean;
+  rooftopOnly?: boolean;
   selectedId: string | null;
   placement: ShopItem | null;
   selectedWallId: string | null;
@@ -133,6 +134,8 @@ export class ShopScene {
   private cityKey = '';
   private building: THREE.Group | null = null;
   private buildingKey = '';
+  private rooftop: THREE.Group | null = null;
+  private rooftopKey = '';
   private landings: THREE.Group | null = null;
   private landingKey = '';
   private lowerFloors: THREE.Group | null = null;
@@ -252,13 +255,14 @@ export class ShopScene {
   update(next: SceneState) {
     const firstShop = !this.state;
     const exteriorChanged = !!next.exteriorOnly !== !!this.state?.exteriorOnly;
-    const levelChanged = next.activeLevel !== this.state?.activeLevel;
+    const levelChanged = next.activeLevel !== this.state?.activeLevel || !!next.rooftopOnly !== !!this.state?.rooftopOnly;
     const buildingDoc = next.building ?? next.shop;
     const previousBuildingBounds = this.state ? JSON.stringify(this.buildingMetrics()) : '';
     const previousFloorY = this.activeFloorY();
     if (this.gesture && (exteriorChanged || levelChanged || getLevelCount(buildingDoc) !== getLevelCount(this.state!.building ?? this.state!.shop))) this.cancelGesture();
     // Exterior camera navigation never claims furniture/build gestures.
     if (next.exteriorOnly) next = { ...next, preview: true, placement: null, wallPlacement: null, selectedId: null, selectedWallId: null, selectedDoor: false, resizeMode: false };
+    if (next.rooftopOnly) next = { ...next, editMode: 'arrange', wallPlacement: null, selectedWallId: null, selectedDoor: false, selectedPartitionId: null };
     if (this.gesture && (next.shop !== this.state?.shop || next.editMode !== this.state?.editMode || next.buildTool !== this.state?.buildTool || next.preview !== this.state?.preview || next.placement !== this.state?.placement || next.wallPlacement !== this.state?.wallPlacement || next.showWalls !== this.state?.showWalls || next.resizeMode !== this.state?.resizeMode || next.selectedId !== this.state?.selectedId || next.selectedWallId !== this.state?.selectedWallId)) this.cancelGesture();
     this.resizeHover = null;
     this.itemSupportCache.clear();
@@ -271,6 +275,15 @@ export class ShopScene {
     const floorY = next.exteriorOnly ? 0 : getLevelBaseY(buildingDoc, activeLevel);
     this.ground.position.y = -0.401 - floorY;
     const stairOpenings = getStairOpenings(buildingDoc, activeLevel);
+    const nextRooftopKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, shop.floorColor, getExterior(buildingDoc), stairOpenings]);
+    if (next.rooftopOnly && nextRooftopKey !== this.rooftopKey) {
+      if (this.rooftop) disposeGroup(this.rooftop);
+      this.rooftop = buildRooftopStructure(buildingDoc);
+      this.scene.add(this.rooftop);
+      this.rooftopKey = nextRooftopKey;
+      this.renderer.shadowMap.needsUpdate = true;
+    }
+    if (this.rooftop) this.rooftop.visible = !!next.rooftopOnly && !next.exteriorOnly;
     let lightingContentChanged = exteriorChanged;
     this.lighting.setMode(next.nightMode ?? false, firstShop || this.reducedMotion.matches);
     const nextRoomKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, this.windowKey(getWallItems(shop)), getWallHeight(shop), getEntrance(shop).position, getEntranceWall(shop), getEntranceRotation(shop), getExterior(shop).awning, shop.floorColor, shop.wallColor, shop.name, activeLevel, stairOpenings, getPartitions(shop), getInteriorDoors(shop)]);
@@ -345,15 +358,15 @@ export class ShopScene {
       lightingContentChanged = true;
       this.renderer.shadowMap.needsUpdate = true;
     }
-    const nextLandingKey = JSON.stringify([activeLevel, shop.width, shop.depth, shop.floorCells, stairOpenings]);
+    const nextLandingKey = JSON.stringify([activeLevel, next.rooftopOnly, shop.width, shop.depth, shop.floorCells, stairOpenings]);
     if (this.landingKey !== nextLandingKey) {
       if (this.landings) disposeGroup(this.landings);
-      this.landings = buildStairLandings(buildingDoc, next.activeLevel ?? 0);
+      this.landings = next.rooftopOnly ? new THREE.Group() : buildStairLandings(buildingDoc, next.activeLevel ?? 0);
       this.scene.add(this.landings);
       this.landingKey = nextLandingKey;
     }
     const lowerDocuments = Array.from({ length: activeLevel }, (_, index) => {
-      const { upperFloors: _upper, ...floor } = getLevelDocument(buildingDoc, index);
+      const { upperFloors: _upper, roof: _roof, rooftop: _rooftop, exterior: _exterior, ...floor } = getLevelDocument(buildingDoc, index);
       return floor;
     });
     const nextLowerFloorKey = JSON.stringify([activeLevel, lowerDocuments, next.showCity]);
@@ -367,10 +380,10 @@ export class ShopScene {
     if (this.lowerFloors) this.lowerFloors.visible = !next.exteriorOnly && activeLevel > 0;
     if (this.building) this.building.visible = !!next.exteriorOnly;
     if (this.landings) this.landings.visible = !next.exteriorOnly;
-    if (this.room) this.room.visible = !next.exteriorOnly;
+    if (this.room) this.room.visible = !next.exteriorOnly && !next.rooftopOnly;
     this.items.visible = !next.exteriorOnly;
     this.itemPlatforms.visible = !next.exteriorOnly;
-    this.wallItems.visible = next.showWalls && !next.exteriorOnly;
+    this.wallItems.visible = next.showWalls && !next.exteriorOnly && !next.rooftopOnly;
     if (firstShop || exteriorChanged || levelChanged || previousFloorY !== floorY || (next.exteriorOnly && previousBuildingBounds !== JSON.stringify(this.buildingMetrics()))) {
       this.resize();
       this.setView(this.view);
@@ -635,7 +648,7 @@ export class ShopScene {
     // App owns the candidate, including explicit coordinates chosen in the inspector.
     const candidate = placement;
     const existingId = this.state.shop.items.some((item) => item.id === candidate.id) ? candidate.id : undefined;
-    const valid = canPlace(this.state.shop, candidate, existingId);
+    const valid = this.canPlaceItem(this.state.shop, candidate, existingId);
     const key = JSON.stringify([candidate.kind, candidate.color, candidate.stock, candidate.width, candidate.depth, getWallHeight(this.state.shop)]);
     if (key !== this.ghostKey || !this.ghost) {
       if (this.ghost) disposeGroup(this.ghost);
@@ -748,7 +761,7 @@ export class ShopScene {
       const cell = this.cellAt(event);
       if (!cell) return null;
       const item = resizeFloorToTile(selected.item, cell);
-      return { item, valid: canPlace(this.state.shop, item, item.id) };
+      return { item, valid: this.canPlaceItem(this.state.shop, item, item.id) };
     }
     if (selected.wallItem) {
       const point = this.resizeWallPoint(event, selected.wallItem);
@@ -799,7 +812,7 @@ export class ShopScene {
       const startEdge = horizontal ? drag.item.x + (drag.resizeEdge === 'max-x' ? size.width : 0) : drag.item.z + (drag.resizeEdge === 'max-z' ? size.depth : 0);
       const delta = horizontal ? point.x - drag.startPoint.x : point.z - drag.startPoint.z;
       drag.candidate = resizeFloorEdge(drag.item, drag.resizeEdge, startEdge + delta);
-      drag.valid = canPlace(drag.base, drag.candidate, drag.item.id);
+      drag.valid = this.canPlaceItem(drag.base, drag.candidate, drag.item.id);
       const object = this.items.children.find(object => object.userData.itemId === drag.item!.id);
       if (object) this.positionItem(object as THREE.Group, drag.candidate);
       this.renderer.domElement.dataset.previewItem = JSON.stringify({ ...drag.candidate, valid: drag.valid });
@@ -1065,7 +1078,7 @@ export class ShopScene {
       if (!object) return;
       drag.candidate = { ...drag.item, x: Math.round(drag.item.x + dx), z: Math.round(drag.item.z + dz) };
       object.position.set(drag.itemPosition.x + dx, this.itemBaseY(drag.candidate) + 0.047, drag.itemPosition.z + dz);
-      drag.valid = canPlace(drag.base, drag.candidate, drag.item.id);
+      drag.valid = this.canPlaceItem(drag.base, drag.candidate, drag.item.id);
       const size = getItemFootprint(drag.item);
       if (!this.itemDragFrame || this.itemDragFrameValid !== drag.valid) {
         if (this.itemDragFrame) disposeGroup(this.itemDragFrame);
@@ -1301,6 +1314,12 @@ export class ShopScene {
       if (intersection.object instanceof THREE.Mesh) return null;
     }
     return null;
+  }
+
+  private canPlaceItem(shop: ShopDocument, item: ShopItem, ignoreId?: string) {
+    return this.state?.rooftopOnly
+      ? canPlaceRooftop(this.state.building ?? this.state.shop, item, ignoreId)
+      : canPlace(shop, item, ignoreId) && (!this.state?.building || canPlaceLevelItem(this.state.building, this.state.activeLevel ?? 0, item, ignoreId));
   }
 
   private updateWallMountGuide(mount?: Pick<WallItem, 'wall' | 'line'> | null) {
@@ -1682,6 +1701,21 @@ export class ShopScene {
     data.activeLevel = String(this.state.activeLevel ?? 0);
     data.levelCount = String(getLevelCount(this.state.building ?? this.state.shop));
     data.exteriorOnly = String(!!this.state.exteriorOnly);
+    data.rooftopOnly = String(!!this.state.rooftopOnly);
+    const building = this.state.building ?? this.state.shop;
+    const roof = getRooftopDocument(building);
+    const roofObjects = this.state.exteriorOnly ? this.building?.getObjectByName('rooftop-terrace')?.children
+      : this.state.rooftopOnly ? this.items.children : [];
+    data.rooftopItems = JSON.stringify((roofObjects ?? []).flatMap(object => {
+      const item = roof.items.find(candidate => candidate.id === object.userData.itemId);
+      if (!item) return [];
+      const footprint = getItemFootprint(item);
+      return [{ id: item.id, kind: item.kind,
+        x: Number((object.position.x + roof.width / 2 - footprint.width / 2).toFixed(5)),
+        z: Number((object.position.z + roof.depth / 2 - footprint.depth / 2).toFixed(5)),
+        rotation: (Math.round(-THREE.MathUtils.radToDeg(object.rotation.y)) + 360) % 360,
+      }];
+    }));
     data.roofStyle = getRoof(this.state.building ?? this.state.shop).style;
     data.buildingHeight = String(this.buildingMetrics().height);
     data.activeFloorY = String(this.activeFloorY());

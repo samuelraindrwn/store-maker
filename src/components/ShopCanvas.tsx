@@ -14,6 +14,7 @@ export type ShopCanvasProps = {
   building?: ShopDocument;
   activeLevel?: number;
   exteriorOnly?: boolean;
+  rooftopOnly?: boolean;
   revision?: number;
   selectedId: string | null;
   placement: ShopItem | null;
@@ -113,7 +114,7 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
   useEffect(() => {
     const instance = engine.current, previous = applied.current;
     if (!instance || !previous) return;
-    const changingView = props.exteriorOnly !== previous.exteriorOnly || props.activeLevel !== previous.activeLevel
+    const changingView = props.exteriorOnly !== previous.exteriorOnly || props.rooftopOnly !== previous.rooftopOnly || props.activeLevel !== previous.activeLevel
       || props.revision !== previous.revision || (props.exteriorOnly && props.building !== previous.building);
     if (!changingView) {
       applied.current = props;
@@ -143,14 +144,14 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
       }
     }); });
     return () => { cancelAnimationFrame(firstFrame); cancelAnimationFrame(secondFrame); };
-  }, [props.shop, props.building, props.activeLevel, props.exteriorOnly, props.revision, props.selectedId, props.placement, props.selectedWallId, props.selectedPartitionId, props.selectedDoor, props.resizeMode, props.wallPlacement, props.wallPlacementMount, props.showGrid, props.showWalls, props.preview, props.editMode, props.buildTool, props.showCity, props.nightMode]);
+  }, [props.shop, props.building, props.activeLevel, props.exteriorOnly, props.rooftopOnly, props.revision, props.selectedId, props.placement, props.selectedWallId, props.selectedPartitionId, props.selectedDoor, props.resizeMode, props.wallPlacement, props.wallPlacementMount, props.showGrid, props.showWalls, props.preview, props.editMode, props.buildTool, props.showCity, props.nightMode]);
 
   return (
     <div className="shop-canvas" aria-busy={loading} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: '#e8e3ed' }}>
       <div ref={mount} style={{ position: 'absolute', inset: 0 }} />
       <div className={`scene-loading ${loading ? 'is-loading' : ''}`} data-testid="scene-loading" role={loading ? 'status' : undefined} aria-hidden={!loading}>
         <div className="scene-loading-mark" aria-hidden="true"><i /><i /><i /></div>
-        <strong>{props.exteriorOnly ? 'Menyiapkan tampilan luar' : `Menyiapkan lantai ${(props.activeLevel ?? 0) + 1}`}</strong>
+        <strong>{props.exteriorOnly ? 'Menyiapkan tampilan luar' : props.rooftopOnly ? 'Menyiapkan rooftop' : `Menyiapkan lantai ${(props.activeLevel ?? 0) + 1}`}</strong>
         <span>Sebentar, tokomu sedang ditata.</span>
       </div>
       {error && (

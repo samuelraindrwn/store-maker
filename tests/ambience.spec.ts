@@ -248,7 +248,7 @@ test('music autoplays with real audio, preserves volume and editor behavior, and
 });
 });
 
-test('the same native music loop continues through exterior, interior, and floor changes', async ({ page }, info) => {
+test('the same native music loop continues through exterior, interior, floor and rooftop changes', async ({ page }, info) => {
   test.setTimeout(90_000);
   const errors = await openApp(page, info);
   await outsidePointer(page);
@@ -259,9 +259,11 @@ test('the same native music loop continues through exterior, interior, and floor
     probe.retainedLoop = active;
     return Boolean(active);
   })).toBe(true);
+  await button(page, 'Edit rooftop').click();
+  await expect(page.locator('.shop-canvas')).toHaveAttribute('aria-busy', 'false');
   const original = await saved(page);
   const start = await withoutGesture(page, () => (window as unknown as ProbeWindow).__cozyAudioProbe.retainedLoop!.source.context.currentTime);
-  for (const name of ['Eksterior', 'Interior', 'Edit lantai 2', 'Eksterior', 'Edit lantai 1']) {
+  for (const name of ['Eksterior', 'Interior', 'Edit lantai 2', 'Edit rooftop', 'Eksterior', 'Edit lantai 1']) {
     await button(page, name).click();
     await expect(page.locator('.shop-canvas')).toHaveAttribute('aria-busy', 'false');
     await expect(canvasFor(page)).toHaveAttribute('data-ready', 'true');

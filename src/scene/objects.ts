@@ -510,7 +510,7 @@ function contourRuns(shop: ShopDocument, side: 'north' | 'west' | 'south' | 'eas
 }
 
 /** Only occupied cells have a slab: concave outlines and holes stay visibly open. */
-function buildContourFloor(shop: ShopDocument, floor: THREE.Group, slabDepth = 0.39, openings: readonly FloorOpening[] = []) {
+export function buildContourFloor(shop: ShopDocument, floor: THREE.Group, slabDepth = 0.39, openings: readonly FloorOpening[] = []) {
   const cells = getFloorCells(shop);
   const matrix = new THREE.Matrix4();
   const tileColor = new THREE.Color(shop.floorColor);
