@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { canPlace, getExterior, getEntrance, getEntranceAnchor, getEntranceRotation, getFloorBounds, getFloorCells, getItemFootprint, getItemPlacementBounds, getWallHeight, hasFloorCell, isStandingSign, MAX_FLOOR_COORD, MIN_FLOOR_COORD, paintFloor, resizeShop, setEntrance, setWallHeight, updateItem, type ShopDocument, type ShopItem } from '../model';
-import { canPlaceWallItem, getWallItems, getWallItemSize, getWallRuns, updateWallItem, wallItemPosition, type WallItem } from '../model';
+import { canPlaceWallItem, getWallItems, getWallItemSize, getWallMountRuns, getWallRuns, updateWallItem, wallItemPosition, type WallItem } from '../model';
 import { applyItemSize, applyWallItemSize, buildCity, buildItem, buildRoom, buildWallItem, disposeGroup, standingSignGroundY, standingSignSupports } from './objects';
 import { makeBuildHandles, minimumSize, positionBuildHandles, type BuildHandleId, type Dimensions } from './interactionHandles';
 import { FloorPainter, floorOutline, strokeCells, workCells } from './interactionFloor';
-import { intersectWall, intersectWallPlane, wallFrame } from './interactionWalls';
+import { intersectWall, intersectWallPlane, wallFrame, type WallHit } from './interactionWalls';
 import { ObjectResizeTools, resizeFloorEdge, resizeFloorToTile, resizeWallEdge, resizeWallToTile, type ResizeEdge } from './interactionObjectResize';
 import { getItemSupport } from './itemSupport';
 import { getWallItemMount } from '../model';
@@ -33,7 +33,7 @@ export type SceneState = {
   selectedPartitionId?: string | null;
   selectedDoor: boolean;
   wallPlacement: WallItem | null;
-  wallPlacementMount?: Pick<WallItem, 'wall' | 'line'> | null;
+  wallPlacementMount?: Pick<WallItem, 'wall' | 'line' | 'partitionId'> | null;
   showGrid: boolean;
   showWalls: boolean;
   showAllWalls?: boolean;
@@ -716,10 +716,18 @@ export class ShopScene {
     this.prepareRay(event);
     if (!fallback && this.state.wallPlacement && this.state.wallPlacementMount) {
       const hit = intersectWallPlane(this.wallEditRay(), this.state.shop, this.state.wallPlacementMount);
-      return hit ? { ...source, wall: hit.wall, line: hit.line, offset: hit.offset, height: hit.height } : null;
+      return this.wallCandidateFromHit(source, hit);
     }
-    const hit = intersectWall(this.wallEditRay(), this.state.shop, fallback ? source : undefined, this.state.exteriorOnly);
-    return hit ? { ...source, wall: hit.wall, line: hit.line, offset: hit.offset, height: hit.height } : null;
+    const hit = intersectWall(this.wallEditRay(), this.state.shop, fallback ? source : undefined, this.state.exteriorOnly, source);
+    return this.wallCandidateFromHit(source, hit);
+  }
+
+  private wallCandidateFromHit(source: WallItem, hit: WallHit | null) {
+    if (!hit) return null;
+    const candidate = { ...source, wall: hit.wall, line: hit.line, offset: hit.offset, height: hit.height };
+    if (hit.partitionId) candidate.partitionId = hit.partitionId;
+    else delete candidate.partitionId;
+    return candidate;
   }
 
   private setWallHover(candidate: WallItem | null) {
@@ -903,7 +911,7 @@ export class ShopScene {
     }
     if (selected.wallItem) {
       const point = this.resizeWallPoint(event, selected.wallItem);
-      const run = getWallRuns(this.state.shop).find(run => run.wall === selected.wallItem!.wall && run.line === selected.wallItem!.line && selected.wallItem!.offset >= run.start && selected.wallItem!.offset <= run.end);
+      const run = getWallMountRuns(this.state.shop, selected.wallItem).find(run => run.wall === selected.wallItem!.wall && run.line === selected.wallItem!.line && run.partitionId === selected.wallItem!.partitionId && selected.wallItem!.offset >= run.start && selected.wallItem!.offset <= run.end);
       if (!point || !run || point.along < run.start || point.along >= run.end || point.height < 0 || point.height > getWallHeight(this.state.shop)) return null;
       const wallItem = resizeWallToTile(selected.wallItem, point.along, point.height);
       return { wallItem, valid: this.validWallCandidate(this.state.shop, wallItem, wallItem.id) };
@@ -1357,8 +1365,8 @@ export class ShopScene {
     } else if (drag.kind === 'wall-item' && drag.wallItem) {
       this.callbacks.onSelectWall(drag.wallItem.id);
       if (drag.moved && drag.valid && drag.wallCandidate) {
-        const { wall, line, offset, height } = drag.wallCandidate;
-        next = updateWallItem(drag.base, drag.wallItem.id, { wall, line, offset, height });
+        const { wall, line, offset, height, partitionId } = drag.wallCandidate;
+        next = updateWallItem(drag.base, drag.wallItem.id, { wall, line, offset, height, partitionId });
         label = 'Hiasan dinding dipindahkan';
       }
     } else if (drag.kind === 'item' && drag.item) {
@@ -1511,10 +1519,10 @@ export class ShopScene {
       : canPlace(shop, item, ignoreId) && (!this.state?.building || canPlaceLevelItem(this.state.building, this.state.activeLevel ?? 0, item, ignoreId));
   }
 
-  private updateWallMountGuide(mount?: Pick<WallItem, 'wall' | 'line'> | null) {
+  private updateWallMountGuide(mount?: Pick<WallItem, 'wall' | 'line' | 'partitionId'> | null) {
     if (!this.state) return;
     const shop = this.state.shop, height = getWallHeight(shop);
-    const runs = mount ? getWallRuns(shop).filter(run => run.wall === mount.wall && run.line === mount.line) : [];
+    const runs = mount ? getWallMountRuns(shop, this.state.wallPlacement ?? undefined).filter(run => run.wall === mount.wall && run.line === mount.line && run.partitionId === mount.partitionId) : [];
     const key = JSON.stringify([runs, shop.width, shop.depth, height, this.wallEditY(), this.state.exteriorOnly]);
     if (key === this.wallMountGuideKey) return;
     this.wallMountGuideKey = key;
@@ -1524,7 +1532,10 @@ export class ShopScene {
     if (!runs.length) return;
     const group = new THREE.Group(); group.name = 'wall-mount-guide'; group.position.y = this.wallEditY();
     for (const run of runs) {
-      const position = wallItemPosition(shop, { ...this.state.wallPlacement!, wall: run.wall, line: run.line, offset: (run.start + run.end) / 2, height: height / 2 });
+      const guideItem = { ...this.state.wallPlacement!, wall: run.wall, line: run.line, offset: (run.start + run.end) / 2, height: height / 2 };
+      if (run.partitionId) guideItem.partitionId = run.partitionId;
+      else delete guideItem.partitionId;
+      const position = wallItemPosition(shop, guideItem);
       const panel = new THREE.Group(); panel.position.set(position.x, position.y, position.z); panel.rotation.y = position.rotation;
       const geometry = new THREE.PlaneGeometry(run.end - run.start, height);
       const surface = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: '#ad8fd0', transparent: true, opacity: 0.055, depthWrite: false, side: THREE.DoubleSide }));
@@ -1607,12 +1618,12 @@ export class ShopScene {
       return;
     }
     if (this.state.preview) return;
+    const wallId = this.pickWallAt(event);
     if (this.state.editMode === 'build' && this.state.buildTool === 'partition') {
+      if (wallId) return;
       if (!this.pickPartitionAt(event)) this.beginGesture(event, 'partition');
       return;
     }
-    // A visible partition owns its click; do not begin dragging furniture behind it.
-    if (this.state.editMode !== 'build' && this.pickPartitionAt(event)) return;
     if (this.resizeSelection()) {
       // Hover outlines must not move the real grips away from their selected object.
       this.resizeHover = null;
@@ -1621,12 +1632,14 @@ export class ShopScene {
       if (edge) this.beginObjectResize(event, edge);
       return;
     }
+    // Explicit resize grips own their pointer above; ordinary clicks on a bare
+    // partition must not start dragging furniture behind that wall.
+    if (this.state.editMode !== 'build' && !wallId && this.pickPartitionAt(event)) return;
     const doorEditable = (this.state.activeLevel ?? 0) === 0 && (this.state.editMode !== 'build' || this.state.buildTool === 'walls');
     if (doorEditable && (this.pickHandle(event) === 'door' || this.roomTarget(event) === 'door')) {
       this.beginGesture(event, 'door', 'door');
       return;
     }
-    const wallId = this.pickWallAt(event);
     const wallItem = wallId ? getWallItems(this.state.shop).find((item) => item.id === wallId) : undefined;
     if (wallItem && (!this.state.exteriorOnly || this.state.editMode !== 'build') && !this.pickHandle(event)) {
       this.beginGesture(event, 'wall-item', undefined, undefined, wallItem);
@@ -1724,11 +1737,11 @@ export class ShopScene {
       if (!this.state.preview) this.callbacks.onSelectDoor();
     } else if (!this.state.preview) {
       if (this.state.exteriorOnly && this.state.editMode === 'build') return;
+      const wallId = this.pickWallAt(event);
+      if (wallId) { this.callbacks.onSelectWall(wallId); return; }
       const partitionId = this.pickPartitionAt(event);
       if (partitionId) { this.callbacks.onSelectPartition?.(partitionId); return; }
-      const wallId = this.pickWallAt(event);
-      if (wallId) this.callbacks.onSelectWall(wallId);
-      else { this.callbacks.onSelectWall(null); this.callbacks.onSelect(this.pickAt(event)); }
+      this.callbacks.onSelectWall(null); this.callbacks.onSelect(this.pickAt(event));
     }
   };
 
@@ -2049,13 +2062,19 @@ export class ShopScene {
     data.wallItemCenters = JSON.stringify(this.state.showWalls ? this.wallItems.children.map((object) => {
       const item = (this.transientWallItems ?? getWallItems(this.state!.shop)).find((candidate) => candidate.id === object.userData.wallItemId);
       const center = new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3());
-      return { id: object.userData.wallItemId as string, wall: item?.wall, line: item?.line, offset: item?.offset, height: item?.height, worldX: object.position.x, worldY: object.position.y, worldZ: object.position.z, ...this.project(center) };
+      return { id: object.userData.wallItemId as string, wall: item?.wall, line: item?.line, partitionId: item?.partitionId, offset: item?.offset, height: item?.height, worldX: object.position.x, worldY: object.position.y, worldZ: object.position.z, ...this.project(center) };
     }) : []);
     const wallTargets: object[] = [];
-    if (this.state.showWalls) getWallRuns(this.state.shop).forEach((run) => {
+    const wallTargetItem = this.state.wallPlacement ?? getWallItems(this.state.shop).find(item => item.id === this.state!.selectedWallId);
+    const wallRuns = this.state.exteriorOnly ? getWallRuns(this.state.shop) : getWallMountRuns(this.state.shop, wallTargetItem);
+    if (this.state.showWalls) wallRuns.forEach((run) => {
       for (let offset = run.start + 0.5; offset < run.end; offset += 0.5) {
         for (let height = 0.5; height < getWallHeight(this.state!.shop); height += 0.5) {
           const point = wallIsHorizontal(run.wall) ? new THREE.Vector3(offset - this.state!.shop.width / 2, height + this.wallEditY(), run.line - this.state!.shop.depth / 2) : new THREE.Vector3(run.line - this.state!.shop.width / 2, height + this.wallEditY(), offset - this.state!.shop.depth / 2);
+          if (run.partitionId) {
+            const mounted = wallItemPosition(this.state!.shop, { id: 'mount-target', kind: 'painting', color: '#ffffff', text: '', lit: false, ...run, offset, height });
+            point.set(mounted.x, mounted.y + this.wallEditY(), mounted.z);
+          }
           wallTargets.push({ ...run, offset, height, ...this.project(point) });
         }
       }

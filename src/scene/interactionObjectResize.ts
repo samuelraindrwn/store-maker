@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getFloorCells, getItemFootprint, getItemPlacementBounds, getWallHeight, getWallItemSize, getWallRuns, isStandingSign, wallItemPosition, type ShopDocument, type ShopItem, type WallItem } from '../model';
+import { getFloorCells, getItemFootprint, getItemPlacementBounds, getWallHeight, getWallItemSize, getWallMountRuns, isStandingSign, wallItemPosition, type ShopDocument, type ShopItem, type WallItem } from '../model';
 import { wallInwardNormal } from './interactionWalls';
 
 export type ResizeEdge = 'min-x' | 'max-x' | 'min-z' | 'max-z' | 'min-y' | 'max-y';
@@ -144,7 +144,7 @@ export class ObjectResizeTools {
     const gripSize = getWallItemSize(handleItem);
     const dx = handleItem.offset - item.offset, dy = handleItem.height - item.height;
     this.grips({ 'min-x': point(dx - gripSize.width / 2, dy), 'max-x': point(dx + gripSize.width / 2, dy), 'min-y': point(dx, dy - gripSize.height / 2), 'max-y': point(dx, dy + gripSize.height / 2) }, camera, scale);
-    const run = getWallRuns(shop).find(run => run.wall === item.wall && run.line === item.line && item.offset >= run.start && item.offset <= run.end);
+    const run = getWallMountRuns(shop, item).find(run => run.wall === item.wall && run.line === item.line && run.partitionId === item.partitionId && item.offset >= run.start && item.offset <= run.end);
     const tileKey = JSON.stringify(['wall', shop.width, shop.depth, run, getWallHeight(shop)]);
     if (tileKey === this.tileKey) return;
     this.tileKey = tileKey;

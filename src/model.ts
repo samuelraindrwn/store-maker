@@ -26,8 +26,11 @@ export interface WallItem {
   mount?: WallItemMount
   wallLampStyle?: WallLampStyle
   wallSignStyle?: WallSignStyle
+  /** Authored interior wall; wall selects one of its two faces. */
+  partitionId?: string
 }
-export interface WallRun { wall: WallSide; line: number; start: number; end: number }
+export interface WallRun { wall: WallSide; line: number; start: number; end: number; partitionId?: string }
+export const PARTITION_WALL_MOUNT_OFFSET = 0.077
 export interface WallCatalogEntry {
   kind: WallItemKind
   name: string
@@ -187,7 +190,7 @@ const documentKeys = ['version', 'name', 'width', 'depth', 'wallColor', 'floorCo
 const optionalDocumentKeys = ['wallHeight', 'entrance', 'floorCells', 'wallItems', 'partitions', 'interiorDoors'] as const
 const buildingDocumentKeys = ['upperFloors', 'roof', 'rooftop', 'exterior'] as const
 const wallItemKeys = ['id', 'kind', 'wall', 'line', 'offset', 'height', 'color', 'text', 'lit'] as const
-const optionalWallItemKeys = ['width', 'sizeHeight', 'windowStyle', 'mount', 'wallLampStyle', 'wallSignStyle'] as const
+const optionalWallItemKeys = ['width', 'sizeHeight', 'windowStyle', 'mount', 'wallLampStyle', 'wallSignStyle', 'partitionId'] as const
 const allowedWallItemKeys = [...wallItemKeys, ...optionalWallItemKeys] as const
 const MAX_WALL_ITEMS = 60
 const MAX_ITEMS = 200
@@ -334,6 +337,17 @@ export function getWallRuns(doc: ShopDocument): WallRun[] {
   return result
 }
 
+/** Mountable faces are separate from the perimeter used to build the room shell. */
+export function getWallMountRuns(doc: ShopDocument, item?: Pick<WallItem, 'kind' | 'mount'>): WallRun[] {
+  const runs = getWallRuns(doc)
+  if (item?.kind === 'window' || item?.mount === 'exterior') return runs
+  for (const partition of doc.partitions ?? []) {
+    const faces: WallSide[] = partition.axis === 'x' ? ['back', 'front'] : ['left', 'right']
+    for (const wall of faces) runs.push({ wall, line: partition.line, start: partition.start, end: partition.end, partitionId: partition.id })
+  }
+  return runs
+}
+
 function isWallItem(value: unknown): value is WallItem {
   if (!isRecord(value) || !keysWithOptional(value, wallItemKeys, optionalWallItemKeys)) return false
   if (own(value, 'width') && !isWallDimension(value.width, 24)) return false
@@ -342,6 +356,7 @@ function isWallItem(value: unknown): value is WallItem {
   if (own(value, 'mount') && value.mount !== 'interior' && value.mount !== 'exterior') return false
   if (own(value, 'wallLampStyle') && (value.kind !== 'wall-lamp' || typeof value.wallLampStyle !== 'string' || !wallLampStyles.has(value.wallLampStyle))) return false
   if (own(value, 'wallSignStyle') && (value.kind !== 'wall-sign' || typeof value.wallSignStyle !== 'string' || !wallSignStyles.has(value.wallSignStyle))) return false
+  if (own(value, 'partitionId') && (!validId(value.partitionId) || value.kind === 'window' || value.mount === 'exterior')) return false
   return typeof value.id === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(value.id)
     && typeof value.kind === 'string' && own(wallCatalogByKind, value.kind)
     && wallSides.includes(value.wall as WallSide)
@@ -422,9 +437,20 @@ export function canPlaceInteriorDoor(doc: ShopDocument, door: InteriorDoor, igno
   if (!wall || door.offset - door.width / 2 < wall.start - 0.000001 || door.offset + door.width / 2 > wall.end + 0.000001) return false
   if (doc.interiorDoors?.some(other => other.id !== ignoreId && (other.id === door.id
     || (other.wallId === door.wallId && Math.abs(other.offset - door.offset) < (other.width + door.width) / 2 - 0.000001)))) return false
+  if (getWallItems(doc).some(item => wallItemOverlapsInteriorDoor(doc, item, door))) return false
   return !(doc.partitions ?? []).some(other => other.axis !== wall.axis
     && other.start < wall.line + 0.000001 && other.end > wall.line - 0.000001
     && other.line > door.offset - door.width / 2 - 0.000001 && other.line < door.offset + door.width / 2 + 0.000001)
+}
+
+function carryPartitionAttachments(doc: ShopDocument, previous: PartitionWall | undefined, wall: PartitionWall): ShopDocument {
+  if (!previous || !doc.wallItems?.some(item => item.partitionId === wall.id)) return doc
+  return { ...doc, wallItems: doc.wallItems.map(item => {
+    if (item.partitionId !== wall.id) return item
+    const positive = item.wall === 'back' || item.wall === 'left'
+    const face: WallSide = wall.axis === 'x' ? (positive ? 'back' : 'front') : (positive ? 'left' : 'right')
+    return { ...item, wall: face, line: wall.line, offset: item.offset + wall.start - previous.start }
+  }) }
 }
 
 export function canPlacePartition(doc: ShopDocument, wall: PartitionWall, ignoreId?: string): boolean {
@@ -437,8 +463,10 @@ export function canPlacePartition(doc: ShopDocument, wall: PartitionWall, ignore
       : !hasFloorCell(doc, wall.line - 1, along) || !hasFloorCell(doc, wall.line, along)) return false
   }
   if (doc.items.some(item => partitionCrossesItem(wall, item))) return false
-  const candidate = { ...doc, partitions: [...(doc.partitions ?? []).filter(other => other.id !== ignoreId), wall] }
+  const candidate = carryPartitionAttachments({ ...doc, partitions: [...(doc.partitions ?? []).filter(other => other.id !== ignoreId), wall] },
+    doc.partitions?.find(other => other.id === ignoreId), wall)
   return (doc.interiorDoors ?? []).every(door => canPlaceInteriorDoor(candidate, door, door.id))
+    && (candidate.wallItems ?? []).every(item => !item.partitionId || fitsWallItem(candidate, item, candidate.wallItems!, getWallMountRuns(candidate, item), item.id))
 }
 
 export function findPartitionPlacement(doc: ShopDocument, preferred: Partial<PartitionWall> = {}): PartitionWall | null {
@@ -473,12 +501,13 @@ export function updatePartition(doc: ShopDocument, id: string, patch: Partial<Pa
     || (own(patch, 'id') && patch.id !== id)) return doc
   const candidate = { ...current, ...patch }
   if (!canPlacePartition(doc, candidate, id) || partitionKeys.every(key => candidate[key] === current[key])) return doc
-  return { ...doc, partitions: doc.partitions!.map(wall => wall.id === id ? candidate : wall) }
+  return carryPartitionAttachments({ ...doc, partitions: doc.partitions!.map(wall => wall.id === id ? candidate : wall) }, current, candidate)
 }
 
 export function removePartition(doc: ShopDocument, id: string): ShopDocument {
   if (!doc.partitions?.some(wall => wall.id === id)) return doc
   return { ...doc, partitions: doc.partitions.filter(wall => wall.id !== id),
+    ...(doc.wallItems?.some(item => item.partitionId === id) ? { wallItems: doc.wallItems.filter(item => item.partitionId !== id) } : {}),
     ...(doc.interiorDoors ? { interiorDoors: doc.interiorDoors.filter(door => door.wallId !== id) } : {}) }
 }
 
@@ -521,7 +550,7 @@ function validPartitions(doc: ShopDocument): boolean {
 }
 
 function wallItemsOverlap(a: WallItem, b: WallItem): boolean {
-  if (a.wall !== b.wall || a.line !== b.line) return false
+  if (a.partitionId !== b.partitionId || a.wall !== b.wall || a.line !== b.line) return false
   if (a.kind !== 'window' && b.kind !== 'window' && getWallItemMount(a) !== getWallItemMount(b)) return false
   const first = getWallItemSize(a)
   const second = getWallItemSize(b)
@@ -529,20 +558,28 @@ function wallItemsOverlap(a: WallItem, b: WallItem): boolean {
     && Math.abs(a.height - b.height) < (first.height + second.height) / 2 - 0.000001
 }
 
+function wallItemOverlapsInteriorDoor(doc: ShopDocument, item: WallItem, door: InteriorDoor): boolean {
+  if (item.partitionId !== door.wallId) return false
+  const size = getWallItemSize(item), opening = getInteriorDoorSize(doc, door)
+  return Math.abs(item.offset - door.offset) < (size.width + opening.width) / 2 - 0.000001
+    && item.height - size.height / 2 < opening.height - 0.000001
+}
+
 function fitsWallItem(doc: ShopDocument, item: WallItem, existing: WallItem[], runs: WallRun[], ignoreId?: string): boolean {
   if (!isWallItem(item) || doc.items.some(furniture => furniture.id === item.id)
     || doc.partitions?.some(wall => wall.id === item.id) || doc.interiorDoors?.some(door => door.id === item.id)) return false
   const size = getWallItemSize(item)
   if (item.height - size.height / 2 < -0.000001 || item.height + size.height / 2 > getWallHeight(doc) + 0.000001) return false
-  if (!runs.some(run => run.wall === item.wall && run.line === item.line
+  if (!runs.some(run => run.partitionId === item.partitionId && run.wall === item.wall && run.line === item.line
     && item.offset - size.width / 2 >= run.start - 0.000001 && item.offset + size.width / 2 <= run.end + 0.000001)) return false
+  if (doc.interiorDoors?.some(door => wallItemOverlapsInteriorDoor(doc, item, door))) return false
   return existing.every(other => other.id === ignoreId || (other.id !== item.id && !wallItemsOverlap(item, other)))
 }
 
 export function wallItemPosition(doc: ShopDocument, item: WallItem): { x: number; y: number; z: number; rotation: number } {
   const horizontal = wallIsHorizontal(item.wall)
   const exterior = getWallItemMount(item) === 'exterior'
-  const inward = (item.wall === 'back' || item.wall === 'left' ? 1 : -1) * (exterior ? -0.162 : 0.012)
+  const inward = (item.wall === 'back' || item.wall === 'left' ? 1 : -1) * (item.partitionId ? PARTITION_WALL_MOUNT_OFFSET : exterior ? -0.162 : 0.012)
   return {
     x: horizontal ? item.offset - doc.width / 2 : item.line - doc.width / 2 + inward,
     y: item.height,
@@ -597,7 +634,7 @@ export function getWallItems(doc: ShopDocument): WallItem[] {
 
 /** Live previews keep fractional positions; committed helpers below snap to a tenth. */
 export function canPlaceWallItem(doc: ShopDocument, item: WallItem, ignoreId?: string): boolean {
-  return fitsWallItem(doc, item, getWallItems(doc), getWallRuns(doc), ignoreId)
+  return fitsWallItem(doc, item, getWallItems(doc), getWallMountRuns(doc, item), ignoreId)
 }
 
 const snapWall = (value: number) => Math.round(value * 10) / 10
@@ -612,6 +649,7 @@ function snapWallItem(item: WallItem): WallItem {
 export function findWallPlacement(doc: ShopDocument, item: WallItem, preferred: Partial<WallItem> = {}): WallItem | null {
   if (!isRecord(preferred) || Reflect.ownKeys(preferred).some(key => typeof key !== 'string' || !allowedWallItemKeys.includes(key as typeof allowedWallItemKeys[number]))) return null
   const proposed = { ...item, ...preferred, id: item.id }
+  if (own(preferred, 'partitionId') && preferred.partitionId === undefined) delete proposed.partitionId
   if (!isWallItem(proposed) || doc.items.some(furniture => furniture.id === proposed.id)
     || doc.partitions?.some(wall => wall.id === proposed.id) || doc.interiorDoors?.some(door => door.id === proposed.id)) return null
   const wanted = snapWallItem(proposed)
@@ -626,8 +664,11 @@ export function findWallPlacement(doc: ShopDocument, item: WallItem, preferred: 
   let best: WallItem | null = null
   let bestTier = Infinity
   let bestDistance = Infinity
-  for (const run of getWallRuns(doc)) {
-    const preferredRun = (!own(preferred, 'wall') || run.wall === wanted.wall) && (!own(preferred, 'line') || (run.line === wanted.line && run.wall === wanted.wall))
+  for (const run of getWallMountRuns(doc, wanted)) {
+    // A saved partition attachment stays on its host until the user explicitly changes it.
+    if (wanted.partitionId && run.partitionId !== wanted.partitionId) continue
+    const preferredRun = (!own(preferred, 'partitionId') || run.partitionId === wanted.partitionId)
+      && (!own(preferred, 'wall') || run.wall === wanted.wall) && (!own(preferred, 'line') || (run.line === wanted.line && run.wall === wanted.wall))
     const tier = preferredRun ? 0 : 1
     if (tier > bestTier) continue
     const firstOffset = Math.ceil((run.start + size.width / 2 - 0.000001) * 10)
@@ -636,13 +677,16 @@ export function findWallPlacement(doc: ShopDocument, item: WallItem, preferred: 
     const axis = wallIsHorizontal(run.wall) ? target.x + doc.width / 2 : target.z + doc.depth / 2
     const offsets = Array.from({ length: lastOffset - firstOffset + 1 }, (_, i) => (firstOffset + i) / 10)
       .sort((a, b) => Math.abs(a - axis) - Math.abs(b - axis))
-    const onWall = existing.filter(other => other.wall === run.wall && other.line === run.line)
+    const onWall = existing.filter(other => other.partitionId === run.partitionId && other.wall === run.wall && other.line === run.line)
     for (const offset of offsets) for (const height of heights) {
       const candidate = { ...wanted, wall: run.wall, line: run.line, offset, height }
+      if (run.partitionId) candidate.partitionId = run.partitionId
+      else delete candidate.partitionId
       const position = wallItemPosition(doc, candidate)
       const distance = (position.x - target.x) ** 2 + (position.z - target.z) ** 2 + (height - wanted.height) ** 2 + (run.wall === wanted.wall ? 0 : 0.00000001)
       if (tier === bestTier && distance >= bestDistance) break
       if (onWall.some(other => wallItemsOverlap(candidate, other))) continue
+      if (doc.interiorDoors?.some(door => wallItemOverlapsInteriorDoor(doc, candidate, door))) continue
       best = candidate; bestTier = tier; bestDistance = distance
     }
   }
@@ -653,7 +697,7 @@ export function placeWallItem(doc: ShopDocument, item: WallItem): ShopDocument {
   if (!isWallItem(item)) return doc
   const items = getWallItems(doc)
   const candidate = snapWallItem(item)
-  if (items.length >= MAX_WALL_ITEMS || !fitsWallItem(doc, candidate, items, getWallRuns(doc))) return doc
+  if (items.length >= MAX_WALL_ITEMS || !fitsWallItem(doc, candidate, items, getWallMountRuns(doc, candidate))) return doc
   return { ...doc, wallItems: [...items, candidate] }
 }
 
@@ -663,14 +707,16 @@ export function updateWallItem(doc: ShopDocument, id: string, patch: Partial<Wal
   if (!current || !isRecord(patch) || Reflect.ownKeys(patch).some(key => typeof key !== 'string' || !allowedWallItemKeys.includes(key as typeof allowedWallItemKeys[number]))) return doc
   if (own(patch, 'id') && patch.id !== id) return doc
   const updated = { ...current, ...patch }
+  if (own(patch, 'partitionId') && patch.partitionId === undefined) delete updated.partitionId
   if (!isWallItem(updated)) return doc
   const candidate = snapWallItem(updated)
-  if (!fitsWallItem(doc, candidate, items, getWallRuns(doc), id)) return doc
+  if (!fitsWallItem(doc, candidate, items, getWallMountRuns(doc, candidate), id)) return doc
   const size = getWallItemSize(candidate)
   const currentSize = getWallItemSize(current)
   if (wallItemKeys.every(key => candidate[key] === current[key]) && size.width === currentSize.width && size.height === currentSize.height
     && getWindowStyle(candidate) === getWindowStyle(current) && getWallItemMount(candidate) === getWallItemMount(current)
-    && getWallLampStyle(candidate) === getWallLampStyle(current) && getWallSignStyle(candidate) === getWallSignStyle(current)) return doc
+    && getWallLampStyle(candidate) === getWallLampStyle(current) && getWallSignStyle(candidate) === getWallSignStyle(current)
+    && candidate.partitionId === current.partitionId) return doc
   return { ...doc, wallItems: items.map(item => item.id === id ? candidate : item) }
 }
 
@@ -682,7 +728,7 @@ export function removeWallItem(doc: ShopDocument, id: string): ShopDocument {
 /** Keep valid attachments fixed, then rehome affected ones without dropping any IDs. */
 function reconcileWallItems(before: ShopDocument, after: ShopDocument): ShopDocument | null {
   const source = getWallItems(before)
-  const runs = getWallRuns(after)
+  const runs = getWallMountRuns(after)
   const fixed = source.filter(item => fitsWallItem(after, item, source, runs, item.id))
   const placed = new Map(fixed.map(item => [item.id, item]))
   const pending = source.filter(item => !placed.has(item.id)).sort((a, b) => {
@@ -1375,7 +1421,7 @@ function parseFloor(value: unknown, allowBuilding: boolean): ShopDocument | null
     }
     if (Array.isArray(value.wallItems)) {
       result.wallItems = []
-      const runs = getWallRuns(result)
+      const runs = getWallMountRuns(result)
       for (const item of value.wallItems) {
         if (!isWallItem(item) || !fitsWallItem(result, item, result.wallItems, runs)) return null
         result.wallItems.push({ ...item })

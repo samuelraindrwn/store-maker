@@ -1,4 +1,4 @@
-import { DoorOpen, Pencil, Plus, Trash2 } from 'lucide-react';
+import { DoorOpen, Paintbrush, Pencil, Plus, Trash2 } from 'lucide-react';
 import { createInteriorDoor, createPartition, getInteriorDoors, getPartitions, placeInteriorDoor, placePartition, removeInteriorDoor, removePartition, updateInteriorDoor, updatePartition, type PartitionWall, type ShopDocument } from '../model';
 import './PartitionPanel.css';
 
@@ -8,13 +8,14 @@ type Props = {
   onSelect: (id: string | null) => void;
   onChange: (shop: ShopDocument) => void;
   onDraw: () => void;
+  onDecorate: (id: string) => void;
   onMessage: (message: string) => void;
 };
 const WALL_ERROR = 'Tembok belum pas. Gunakan garis di dalam lantai yang tidak memotong perabot atau menumpuk tembok lain.';
 const DOOR_ERROR = 'Pintu belum muat. Atur posisi dan lebarnya agar tetap di dalam tembok dan tidak menumpuk pintu lain.';
 const COLORS = ['#efe5d6', '#d6dcca', '#e8d7df', '#d6d9e6', '#ead2b6', '#c6b8de'];
 
-export default function PartitionPanel({ shop, selectedId, onSelect, onChange, onDraw, onMessage }: Props) {
+export default function PartitionPanel({ shop, selectedId, onSelect, onChange, onDraw, onDecorate, onMessage }: Props) {
   const walls = getPartitions(shop), selected = walls.find(wall => wall.id === selectedId);
   const doors = getInteriorDoors(shop).filter(door => door.wallId === selected?.id);
   const change = (next: ShopDocument, error = WALL_ERROR) => {
@@ -59,6 +60,7 @@ export default function PartitionPanel({ shop, selectedId, onSelect, onChange, o
       </div>
       <span className="field-label">WARNA TEMBOK</span><div className="color-picker" role="group" aria-label="Warna tembok dalam">{COLORS.map((color,index) => <button key={color} style={{background:color}} aria-label={`Warna tembok dalam ${index+1}`} aria-pressed={selected.color === color} onClick={() => update({color})} />)}</div>
       <div className="partition-actions">
+        <button className="button button-light" aria-label="Pasang dekorasi di tembok dalam" onClick={() => onDecorate(selected.id)}><Paintbrush size={15}/>Pasang dekorasi</button>
         <button className="button button-light" aria-label="Tambah pintu dalam" onClick={() => {
           const door=createInteriorDoor(shop,selected.id);
           if (!door) { onMessage('Belum ada ruang kosong untuk pintu di tembok ini.'); return; }

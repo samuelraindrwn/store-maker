@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { createEmptyShop, wallIsHorizontal, type ShopDocument, type WallItem, type WallSide } from '../model';
+import { createEmptyShop, PARTITION_WALL_MOUNT_OFFSET, wallIsHorizontal, wallItemPosition, type ShopDocument, type WallItem, type WallSide } from '../model';
 import { intersectWall, intersectWallPlane, wallInwardNormal } from './interactionWalls';
 
 const sides: WallSide[] = ['back', 'left', 'front', 'right'];
@@ -64,5 +64,54 @@ describe('wall picking follows the four inward-facing sides', () => {
     const point = mountPoint(target), ray = new THREE.Ray(point.clone().addScaledVector(normal, -3), normal);
     expect(intersectWallPlane(ray, shop, item)).toMatchObject({ wall, line: item.line, offset: -1.25, height: 4 });
     expect(intersectWallPlane(new THREE.Ray(point, new THREE.Vector3(0, 1, 0)), shop, item)).toBeNull();
+  });
+});
+
+describe('authored partition mounting faces', () => {
+  const fixture = (wall: WallSide): ShopDocument => ({ ...shop,
+    partitions: [{ id: 'divider', axis: wallIsHorizontal(wall) ? 'x' : 'z', line: wallIsHorizontal(wall) ? 3 : 4, start: 1, end: wallIsHorizontal(wall) ? 7 : 5, color: '#eeeeee' }],
+  });
+  const painting = (wall: WallSide): WallItem => ({ ...source(wall), id: 'partition-art', kind: 'painting', partitionId: 'divider', line: wallIsHorizontal(wall) ? 3 : 4 });
+
+  it.each(sides)('picks the %s partition face at the same surface as its rendered decor', wall => {
+    const doc = fixture(wall), item = painting(wall), position = wallItemPosition(doc, item), normal = wallInwardNormal(wall);
+    const point = new THREE.Vector3(position.x, position.y, position.z);
+    const ray = new THREE.Ray(point.clone().addScaledVector(normal, 0.75), normal.clone().negate());
+    const hit = intersectWall(ray, doc, undefined, false, item)!;
+    expect(hit).toMatchObject({ wall, line: item.line, partitionId: 'divider', offset: item.offset, height: item.height });
+    expect(hit.distance).toBeCloseTo(0.75);
+    expect(hit.point.distanceTo(point)).toBeLessThan(0.000001);
+    const centerPlane = wallIsHorizontal(wall) ? item.line - doc.depth / 2 : item.line - doc.width / 2;
+    expect(Math.abs((wallIsHorizontal(wall) ? hit.point.z : hit.point.x) - centerPlane)).toBeCloseTo(PARTITION_WALL_MOUNT_OFFSET);
+  });
+
+  it('moves a dragged decoration from a partition onto the outer wall without retaining the old mounting identity', () => {
+    const doc = fixture('back'), item = painting('back');
+    const ray = new THREE.Ray(new THREE.Vector3(0.5 - doc.width / 2, 1.5, 2), new THREE.Vector3(0, 0, -1));
+    const hit = intersectWall(ray, doc, item)!;
+    expect(hit).toMatchObject({ wall: 'back', line: 0, offset: 0.5 });
+    expect(hit).not.toHaveProperty('partitionId');
+  });
+
+  it('keeps the selected partition face for an out-of-bounds rejected drop', () => {
+    const doc = fixture('front'), item = painting('front');
+    const ray = new THREE.Ray(new THREE.Vector3(-1.5, 5, -1), new THREE.Vector3(0, 0, 1));
+    expect(intersectWall(ray, doc, undefined, false, item)).toBeNull();
+    expect(intersectWall(ray, doc, item)).toMatchObject({ wall: 'front', line: 3, partitionId: 'divider', height: 5 });
+  });
+
+  it('does not send a window through a partition to the distant boundary', () => {
+    const doc = fixture('back'), ray = new THREE.Ray(new THREE.Vector3(-1.5, 1.5, 1), new THREE.Vector3(0, 0, -1));
+    expect(intersectWall(ray, doc, undefined, false, source('back'))).toBeNull();
+    expect(intersectWall(ray, doc, undefined, false, painting('back'))).toMatchObject({ partitionId: 'divider' });
+  });
+
+  it('never offers partition faces to an exterior placement', () => {
+    const doc = fixture('back'), ray = new THREE.Ray(new THREE.Vector3(-1.5, 1.5, 8), new THREE.Vector3(0, 0, -1));
+    const item: WallItem = { ...painting('back'), mount: 'exterior' };
+    delete item.partitionId;
+    const hit = intersectWall(ray, doc, undefined, true, item)!;
+    expect(hit).toMatchObject({ wall: 'front', line: 6 });
+    expect(hit).not.toHaveProperty('partitionId');
   });
 });

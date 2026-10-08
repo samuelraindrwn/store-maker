@@ -23,7 +23,7 @@ export type ShopCanvasProps = {
   selectedDoor: boolean;
   resizeMode?: boolean;
   wallPlacement: WallItem | null;
-  wallPlacementMount?: Pick<WallItem, 'wall' | 'line'> | null;
+  wallPlacementMount?: Pick<WallItem, 'wall' | 'line' | 'partitionId'> | null;
   showGrid: boolean;
   showWalls: boolean;
   showAllWalls?: boolean;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { createEmptyShop, getWallItemSize, wallIsHorizontal, wallItemPosition, type WallItem, type WallSide } from '../model';
+import { canPlaceWallItem, createEmptyShop, getWallItemSize, wallIsHorizontal, wallItemPosition, type ShopDocument, type WallItem, type WallSide } from '../model';
 import { disposeGroup } from './objects';
 import { ObjectResizeTools, resizeWallEdge } from './interactionObjectResize';
 import { intersectWallPlane, wallInwardNormal } from './interactionWalls';
@@ -43,5 +43,44 @@ describe('resize grips and tiles on every wall side', () => {
       tools.wall(shop, resized, view, 1, true, item);
       expect(grip('max-x').position.distanceTo(high)).toBeLessThan(0.000001);
     } finally { disposeGroup(tools.group); }
+  });
+});
+
+describe('partition decor resize surfaces', () => {
+  it.each(sides)('keeps %s resize tiles on the selected partition face and within its authored span', wall => {
+    const horizontal = wallIsHorizontal(wall);
+    const shop: ShopDocument = { ...createEmptyShop(), width: 8, depth: 6,
+      partitions: [{ id: 'divider', axis: horizontal ? 'x' : 'z', line: horizontal ? 3 : 4, start: 1, end: horizontal ? 7 : 5, color: '#eeeeee' }],
+    };
+    const item: WallItem = { id: 'art', kind: 'painting', partitionId: 'divider', wall, line: horizontal ? 3 : 4,
+      offset: 2.5, height: 1.4, color: '#aabbcc', text: '', lit: false };
+    const tools = new ObjectResizeTools(), camera = new THREE.PerspectiveCamera();
+    try {
+      tools.wall(shop, item, camera, 1, true);
+      expect(tools.targets.length).toBeGreaterThan(0);
+      expect(tools.targets.every(target => target.x > 1 && target.x < (horizontal ? 7 : 5))).toBe(true);
+      const normal = wallInwardNormal(wall);
+      for (const target of tools.targets) {
+        const mount = wallItemPosition(shop, { ...item, offset: target.x, height: target.height! });
+        expect(target.point.clone().sub(new THREE.Vector3(mount.x, mount.y, mount.z)).dot(normal)).toBeCloseTo(0.04);
+      }
+      const resized = resizeWallEdge(item, 'max-x', 3.5);
+      expect(resized.partitionId).toBe('divider');
+      expect(canPlaceWallItem(shop, resized)).toBe(true);
+      expect(canPlaceWallItem(shop, resizeWallEdge(item, 'max-x', horizontal ? 7.2 : 5.2))).toBe(false);
+    } finally { disposeGroup(tools.group); }
+  });
+
+  it('rejects a resize across an interior doorway on either partition face', () => {
+    const shop: ShopDocument = { ...createEmptyShop(), width: 8, depth: 6,
+      partitions: [{ id: 'divider', axis: 'x', line: 3, start: 1, end: 7, color: '#eeeeee' }],
+      interiorDoors: [{ id: 'inner-door', wallId: 'divider', offset: 4, width: 1, color: '#aaaaaa', open: false }],
+    };
+    for (const wall of ['back', 'front'] as const) {
+      const item: WallItem = { id: 'art', kind: 'painting', partitionId: 'divider', wall, line: 3,
+        offset: 2.5, height: 1.4, color: '#aabbcc', text: '', lit: false };
+      expect(canPlaceWallItem(shop, item)).toBe(true);
+      expect(canPlaceWallItem(shop, resizeWallEdge(item, 'max-x', 4.2))).toBe(false);
+    }
   });
 });
