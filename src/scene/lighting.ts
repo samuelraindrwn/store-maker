@@ -6,13 +6,16 @@ export type NightOpacityTag = { day: number; night: number };
 
 const TRANSITION_SECONDS = 0.8;
 export const MAX_LOCAL_LIGHTS = 8;
+// Match the city plate. Night illumination already darkens both surfaces;
+// darkening only the terrain's albedo made the surrounding land look like void.
+const TERRAIN_COLOR = '#c9d1bd';
 const DAY = {
-  background: new THREE.Color('#e8edf0'), fog: new THREE.Color('#e8edf0'), ground: new THREE.Color('#e8edf0'),
+  background: new THREE.Color('#e8edf0'), fog: new THREE.Color('#e8edf0'), ground: new THREE.Color(TERRAIN_COLOR),
   sky: new THREE.Color('#fff6e8'), hemisphereGround: new THREE.Color('#ada3b7'), sun: new THREE.Color('#fff1db'), fill: new THREE.Color('#d6d2ff'),
   hemisphere: 2.4, sunlight: 3.1, fillLight: 1.15, exposure: 1.12,
 };
 const NIGHT = {
-  background: new THREE.Color('#111b31'), fog: new THREE.Color('#17243d'), ground: new THREE.Color('#334057'),
+  background: new THREE.Color('#111b31'), fog: new THREE.Color('#17243d'), ground: new THREE.Color(TERRAIN_COLOR),
   sky: new THREE.Color('#90a8d6'), hemisphereGround: new THREE.Color('#4a405c'), sun: new THREE.Color('#b6cdff'), fill: new THREE.Color('#8296ce'),
   hemisphere: 1.0, sunlight: 0.62, fillLight: 0.38, exposure: 1.05,
 };

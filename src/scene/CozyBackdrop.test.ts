@@ -6,6 +6,23 @@ import { buildCity } from './city';
 import { disposeGroup } from './objects';
 import { buildSkyline } from './skyline';
 
+function createGround(width = 180, depth = 180) {
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), new THREE.MeshStandardMaterial());
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.401;
+  return ground;
+}
+
+function createCamera(position: [number, number, number], target: [number, number, number], zoom = 1, span = 30) {
+  const camera = new THREE.OrthographicCamera(-span, span, span / 1.6, -span / 1.6, 0.1, 100);
+  camera.position.set(...position);
+  camera.lookAt(new THREE.Vector3(...target));
+  camera.zoom = zoom;
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld();
+  return camera;
+}
+
 describe('cozy sky backdrop', () => {
   it('fills the viewport without intercepting editing rays or writing depth', () => {
     const sky = new CozyBackdrop();
@@ -26,42 +43,58 @@ describe('cozy sky backdrop', () => {
     } finally { sky.dispose(); }
   });
 
-  it('updates ground bounds and lighting uniforms without recompiling or replacing GPU resources', () => {
+  it('keeps opaque terrain and reuses the lighting material as the camera and time change', () => {
     const sky = new CozyBackdrop();
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(180, 180), new THREE.MeshStandardMaterial());
+    const ground = createGround();
+    const groundMaterial = ground.material, groundGeometry = ground.geometry;
+    const compile = ground.material.onBeforeCompile, cacheKey = ground.material.customProgramCacheKey;
     try {
-      sky.configureGround(ground, createEmptyShop());
+      sky.configureGround(ground);
       const version = ground.material.version;
       const material = sky.mesh.material, geometry = sky.mesh.geometry;
       const shader = { uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader } as Parameters<THREE.Material['onBeforeCompile']>[0];
       ground.material.onBeforeCompile(shader, {} as THREE.WebGLRenderer);
-      const uniforms = shader.uniforms as Record<string, THREE.IUniform>;
-      const previousCenter = uniforms.uBackdropGroundCenter.value.clone();
-      const shifted = { ...createEmptyShop(), floorCells: [{ x: -4, z: 8 }, { x: -3, z: 8 }] };
-      sky.configureGround(ground, shifted);
-      for (const progress of [0, 0.2, 0.7, 1, 0.4]) sky.setNightProgress(progress);
+      for (const progress of [0, 0.2, 0.7, 1, 0.4]) {
+        sky.setNightProgress(progress);
+        sky.configureGround(ground);
+        sky.updateGround(createCamera([150 * progress + 10.5, 8.8, 13.5], [150 * progress, 0, 0], 0.55));
+      }
       sky.setView('top');
-      expect(uniforms.uBackdropGroundCenter.value.equals(previousCenter)).toBe(false);
       expect(ground.material.version).toBe(version);
+      expect(ground.material).toBe(groundMaterial);
+      expect(ground.geometry).toBe(groundGeometry);
+      expect(ground.material.onBeforeCompile).toBe(compile);
+      expect(ground.material.customProgramCacheKey).toBe(cacheKey);
       expect(sky.mesh.material).toBe(material);
       expect(sky.mesh.geometry).toBe(geometry);
-      expect(ground.material.transparent).toBe(true);
-      expect(ground.material.depthWrite).toBe(false);
-      expect(shader.fragmentShader).toContain('diffuseColor.a *=');
+      expect(ground.material.transparent).toBe(false);
+      expect(ground.material.depthWrite).toBe(true);
+      expect(ground.material.opacity).toBe(1);
+      expect(shader.fragmentShader).not.toContain('uBackdropGround');
+      expect(shader.fragmentShader).not.toContain('diffuseColor.a *=');
     } finally { sky.dispose(); ground.geometry.dispose(); ground.material.dispose(); }
   });
 
   it('restores borrowed ground settings and disposes owned resources exactly once', () => {
     const sky = new CozyBackdrop();
     const scene = new THREE.Scene();
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(180, 180), new THREE.MeshStandardMaterial());
+    const ground = createGround();
+    ground.material.transparent = true;
+    ground.material.depthWrite = false;
+    ground.material.opacity = 0.37;
+    ground.renderOrder = 8;
+    ground.position.set(13, -12, -17);
+    ground.scale.set(1.2, 0.8, 1);
+    const originalScale = ground.scale.clone();
     const compile = ground.material.onBeforeCompile, cacheKey = ground.material.customProgramCacheKey;
     const geometryDispose = vi.fn(), materialDispose = vi.fn(), groundDispose = vi.fn();
     sky.mesh.geometry.addEventListener('dispose', geometryDispose);
     sky.mesh.material.addEventListener('dispose', materialDispose);
     ground.material.addEventListener('dispose', groundDispose);
     scene.add(sky.mesh);
-    sky.configureGround(ground, createEmptyShop());
+    sky.configureGround(ground);
+    sky.updateGround(createCamera([210, 8.8, 13.5], [200, 0, 0], 0.55));
+    ground.position.y = -14;
     sky.dispose(); sky.dispose();
     expect(scene.children).not.toContain(sky.mesh);
     expect(geometryDispose).toHaveBeenCalledTimes(1);
@@ -69,30 +102,54 @@ describe('cozy sky backdrop', () => {
     expect(groundDispose).not.toHaveBeenCalled();
     expect(ground.material.onBeforeCompile).toBe(compile);
     expect(ground.material.customProgramCacheKey).toBe(cacheKey);
-    expect(ground.material.transparent).toBe(false);
-    expect(ground.material.depthWrite).toBe(true);
-    expect(ground.renderOrder).toBe(0);
+    expect(ground.material.transparent).toBe(true);
+    expect(ground.material.depthWrite).toBe(false);
+    expect(ground.material.opacity).toBe(0.37);
+    expect(ground.renderOrder).toBe(8);
+    expect(ground.position.toArray()).toEqual([13, -14, -17]);
+    expect(ground.scale.equals(originalScale)).toBe(true);
     ground.geometry.dispose(); ground.material.dispose();
   });
 
-  it('finishes the ground fade at the real city base edge rather than leaving a dark strip outside it', () => {
-    const shop = createInitialShop(), city = buildCity(shop), sky = new CozyBackdrop();
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(180, 180), new THREE.MeshStandardMaterial());
+  const cameraCases: [string, [number, number, number], [number, number, number], number, number][] = [
+    ['normal orbit', [10.5, 8.8, 13.5], [0, 3.5, 0], 1, 0],
+    ['opposite orbit at minimum zoom', [-15, 10, -18], [0, 1, 0], 0.55, 0],
+    ['shallow orbit', [0, 1.4, 20], [0, 0, 0], 0.55, 0],
+    ['front view', [0.4, 7.4, 20], [0, 0.6, 0], 0.55, 0],
+    ['top view', [0, 18, 0.001], [0, 0, 0], 0.55, 0],
+    ['panned far outside the original plane', [410.5, 8.8, -286.5], [400, 0, -300], 0.55, 0],
+    ['four-storey rooftop after a pan', [-179.5, 8.8, 163.5], [-190, 0, 150], 0.55, 15],
+  ];
+  it.each(cameraCases)('supports every visible ground ray in %s', (_name, position, target, zoom, floorY) => {
+    const sky = new CozyBackdrop();
+    // A non-square input catches scaling the wrong local axis after the plane rotates.
+    const ground = createGround(80, 30);
+    const camera = createCamera(position, target, zoom);
+    ground.position.y -= floorY;
     try {
-      sky.configureGround(ground, shop);
-      const shader = { uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader } as Parameters<THREE.Material['onBeforeCompile']>[0];
-      ground.material.onBeforeCompile(shader, {} as THREE.WebGLRenderer);
-      const size = new THREE.Vector3(), position = new THREE.Vector3(), matrix = new THREE.Matrix4();
-      (city.getObjectByName('city-box') as THREE.InstancedMesh).getMatrixAt(0, matrix);
-      matrix.decompose(position, new THREE.Quaternion(), size);
-      const half = shader.uniforms.uBackdropGroundHalfSize.value as THREE.Vector2;
-      const center = shader.uniforms.uBackdropGroundCenter.value as THREE.Vector2;
-      const fade = shader.uniforms.uBackdropGroundFeather.value as number;
-      expect(half.x + fade).toBeCloseTo(size.x / 2);
-      expect(half.y + fade).toBeCloseTo(size.z / 2);
-      expect(center.x).toBeCloseTo(position.x);
-      expect(center.y).toBeCloseTo(position.z);
-    } finally { sky.dispose(); disposeGroup(city); ground.geometry.dispose(); ground.material.dispose(); }
+      sky.configureGround(ground);
+      sky.updateGround(camera);
+      ground.updateMatrixWorld();
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -ground.position.y);
+      let supportedRays = 0;
+      for (const x of [-1, -0.5, 0, 0.5, 1]) for (const y of [-1, -0.5, 0, 0.5, 1]) {
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+        const expected = raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+        if (!expected || Math.abs(expected.clone().project(camera).z) > 1) continue;
+        const hit = raycaster.intersectObject(ground)[0];
+        expect(hit, `visible ground at viewport ${x}, ${y}`).toBeDefined();
+        expect(hit.point.distanceTo(expected)).toBeLessThan(0.0001);
+        supportedRays++;
+      }
+      expect(supportedRays).toBeGreaterThan(0);
+      expect(ground.position.y).toBeCloseTo(-0.401 - floorY);
+      const bounds = new THREE.Box3().setFromObject(ground);
+      expect(bounds.min.x).toBeLessThanOrEqual(-40);
+      expect(bounds.max.x).toBeGreaterThanOrEqual(40);
+      expect(bounds.min.z).toBeLessThanOrEqual(-15);
+      expect(bounds.max.z).toBeGreaterThanOrEqual(15);
+    } finally { sky.dispose(); ground.geometry.dispose(); ground.material.dispose(); }
   });
 });
 
@@ -104,6 +161,31 @@ const fixtures: [string, ShopDocument][] = [
 ];
 
 describe('larger surrounding architecture', () => {
+  it.each(fixtures)('keeps land below the entire %s skyline at ground and rooftop elevations', (_label, shop) => {
+    const skyline = buildSkyline(shop), sky = new CozyBackdrop(), ground = createGround();
+    try {
+      sky.configureGround(ground);
+      for (const floorY of [0, 15]) {
+        skyline.position.y = -floorY;
+        ground.position.y = -0.401 - floorY;
+        sky.updateGround(createCamera([10.5, 8.8, 13.5], [0, 0, 0], 0.55));
+        ground.updateMatrixWorld();
+        const skylineBounds = new THREE.Box3().setFromObject(skyline);
+        for (const x of [skylineBounds.min.x, skylineBounds.max.x]) for (const z of [skylineBounds.min.z, skylineBounds.max.z]) {
+          const raycaster = new THREE.Raycaster(new THREE.Vector3(x, skylineBounds.min.y + 0.5, z), new THREE.Vector3(0, -1, 0));
+          const hit = raycaster.intersectObject(ground)[0];
+          expect(hit, `terrain beneath skyline at ${x}, ${z}`).toBeDefined();
+          // Some facade trim extends slightly below grade; terrain may bury it,
+          // but no tower footprint should be left suspended above the ground.
+          expect(skylineBounds.min.y - hit.point.y).toBeGreaterThan(-0.25);
+          expect(skylineBounds.min.y - hit.point.y).toBeLessThan(0.02);
+        }
+        expect(ground.material.opacity).toBe(1);
+        expect(ground.material.transparent).toBe(false);
+      }
+    } finally { sky.dispose(); disposeGroup(skyline); ground.geometry.dispose(); ground.material.dispose(); }
+  });
+
   it.each(fixtures)('keeps neighboring shops separate from each other and the %s shop', (_label, shop) => {
     const city = buildCity(shop);
     try {

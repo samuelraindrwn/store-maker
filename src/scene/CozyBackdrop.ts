@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { getFloorBounds, type ShopDocument } from '../model';
 
 const fragmentShader = `
   uniform float uNight;
@@ -81,11 +80,12 @@ const fragmentShader = `
 type GroundMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
 type GroundState = {
   mesh: GroundMesh;
-  compile: THREE.MeshStandardMaterial['onBeforeCompile'];
-  cacheKey: THREE.MeshStandardMaterial['customProgramCacheKey'];
   transparent: boolean;
   depthWrite: boolean;
-  renderOrder: number;
+  opacity: number;
+  position: THREE.Vector3;
+  scale: THREE.Vector3;
+  size: THREE.Vector2;
 };
 
 /** One screen-filling sky, independent of the active storey's height or camera orbit. */
@@ -93,9 +93,9 @@ export class CozyBackdrop {
   readonly mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private ground?: GroundState;
   private disposed = false;
-  private readonly groundCenter = { value: new THREE.Vector2() };
-  private readonly groundHalfSize = { value: new THREE.Vector2(23, 20) };
-  private readonly groundFeather = { value: 9 };
+  private readonly groundBounds = new THREE.Box2();
+  private readonly corner = new THREE.Vector3();
+  private readonly groundPoint = new THREE.Vector2();
 
   constructor() {
     const material = new THREE.ShaderMaterial({
@@ -124,48 +124,58 @@ export class CozyBackdrop {
     this.mesh.material.uniforms.uTopView.value = view === 'top' ? 1 : 0;
   }
 
-  /** Fade the large shadow-catching ground beyond the finite neighborhood. */
-  configureGround(mesh: THREE.Mesh, shop: ShopDocument) {
+  /** Continuous terrain supports both the neighborhood and the distant towers. */
+  configureGround(mesh: THREE.Mesh) {
     if (!(mesh.material instanceof THREE.MeshStandardMaterial)) return;
     if (this.ground?.mesh !== mesh) {
       this.restoreGround();
+      mesh.geometry.computeBoundingBox();
+      const bounds = mesh.geometry.boundingBox;
+      if (!bounds || bounds.max.x <= bounds.min.x || bounds.max.y <= bounds.min.y) return;
       const material = mesh.material;
-      const originalCompile = material.onBeforeCompile;
-      this.ground = { mesh: mesh as GroundMesh, compile: originalCompile, cacheKey: material.customProgramCacheKey,
-        transparent: material.transparent, depthWrite: material.depthWrite, renderOrder: mesh.renderOrder };
-      material.transparent = true;
-      material.depthWrite = false;
-      mesh.renderOrder = -1000;
-      material.onBeforeCompile = (shader, renderer) => {
-        originalCompile.call(material, shader, renderer);
-        shader.uniforms.uBackdropGroundCenter = this.groundCenter;
-        shader.uniforms.uBackdropGroundHalfSize = this.groundHalfSize;
-        shader.uniforms.uBackdropGroundFeather = this.groundFeather;
-        shader.vertexShader = `varying vec2 vBackdropGroundPosition;\n${shader.vertexShader}`
-          .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBackdropGroundPosition = (modelMatrix * vec4(transformed, 1.0)).xz;');
-        shader.fragmentShader = `varying vec2 vBackdropGroundPosition;\nuniform vec2 uBackdropGroundCenter;\nuniform vec2 uBackdropGroundHalfSize;\nuniform float uBackdropGroundFeather;\n${shader.fragmentShader}`
-          .replace('#include <alphatest_fragment>', `vec2 backdropEdge = abs(vBackdropGroundPosition - uBackdropGroundCenter) - uBackdropGroundHalfSize;
-            diffuseColor.a *= 1.0 - smoothstep(0.0, uBackdropGroundFeather, max(backdropEdge.x, backdropEdge.y));
-            #include <alphatest_fragment>`);
-      };
-      material.customProgramCacheKey = () => 'cozy-ground-fade-v1';
+      this.ground = { mesh: mesh as GroundMesh, transparent: material.transparent,
+        depthWrite: material.depthWrite, opacity: material.opacity,
+        position: mesh.position.clone(), scale: mesh.scale.clone(),
+        size: new THREE.Vector2(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y) };
+      // Alpha fading exposed stars beneath buildings outside the small city
+      // plate. Let the existing distance fog soften terrain, never its opacity.
+      material.transparent = false;
+      material.depthWrite = true;
+      material.opacity = 1;
       material.needsUpdate = true;
     }
-    const bounds = getFloorBounds(shop);
-    this.groundCenter.value.set((bounds.minX + bounds.maxX + 1) / 2 - shop.width / 2, (bounds.minZ + bounds.maxZ + 1) / 2 - shop.depth / 2 - 3);
-    // The city base covers this transition. By its outer edge the ground is
-    // fully transparent, avoiding a black or white strip below the diorama.
-    this.groundHalfSize.value.set(Math.max(42, bounds.width + 24) / 2 + 2 - this.groundFeather.value, Math.max(38, bounds.depth + 30) / 2 - this.groundFeather.value);
+  }
+
+  /** Cover every visible ground point, including after zooming out or panning. */
+  updateGround(camera: THREE.Camera) {
+    if (!this.ground) return;
+    const { mesh, position, scale, size } = this.ground;
+    this.groundBounds.min.set(position.x - size.x * scale.x / 2, position.z - size.y * scale.y / 2);
+    this.groundBounds.max.set(position.x + size.x * scale.x / 2, position.z + size.y * scale.y / 2);
+    camera.updateMatrixWorld();
+    // The projection of the entire frustum contains every possible intersection
+    // with the horizontal terrain, at any active storey's elevation.
+    for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) {
+      this.corner.set(x, y, z).unproject(camera);
+      this.groundBounds.expandByPoint(this.groundPoint.set(this.corner.x, this.corner.z));
+    }
+    this.groundBounds.expandByScalar(2);
+    const { min, max } = this.groundBounds;
+    mesh.position.x = (min.x + max.x) / 2;
+    mesh.position.z = (min.y + max.y) / 2;
+    mesh.scale.x = (max.x - min.x) / size.x;
+    mesh.scale.y = (max.y - min.y) / size.y;
   }
 
   private restoreGround() {
     if (!this.ground) return;
-    const { mesh, compile, cacheKey, transparent, depthWrite, renderOrder } = this.ground;
-    mesh.material.onBeforeCompile = compile;
-    mesh.material.customProgramCacheKey = cacheKey;
+    const { mesh, transparent, depthWrite, opacity, position, scale } = this.ground;
     mesh.material.transparent = transparent;
     mesh.material.depthWrite = depthWrite;
-    mesh.renderOrder = renderOrder;
+    mesh.material.opacity = opacity;
+    mesh.position.x = position.x;
+    mesh.position.z = position.z;
+    mesh.scale.copy(scale);
     mesh.material.needsUpdate = true;
     this.ground = undefined;
   }

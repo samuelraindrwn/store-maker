@@ -30,7 +30,7 @@ describe('fixed night lighting rig', () => {
       expect((f.scene.background as THREE.Color).getHexString()).toBe('e8edf0');
       expect((f.scene.fog as THREE.Fog).color.getHexString()).toBe('e8edf0');
       expect([(f.scene.fog as THREE.Fog).near, (f.scene.fog as THREE.Fog).far]).toEqual([32, 70]);
-      expect(f.ground.color.getHexString()).toBe('e8edf0');
+      expect(f.ground.color.getHexString()).toBe('c9d1bd');
       expect(f.rig.hemisphere.color.getHexString()).toBe('fff6e8');
       expect(f.rig.hemisphere.groundColor.getHexString()).toBe('ada3b7');
       expect(f.rig.hemisphere.intensity).toBe(2.4);
@@ -55,8 +55,10 @@ describe('fixed night lighting rig', () => {
       expect(f.rig.mode).toBe('night'); expect(f.rig.nightProgress).toBe(0);
       expect(f.rig.update(0.4)).toBe(true);
       expect(f.rig.nightProgress).toBeCloseTo(0.5);
+      expect(f.ground.color.getHexString()).toBe('c9d1bd');
       expect(f.rig.update(0.4)).toBe(true);
       expect(f.rig.nightProgress).toBe(1);
+      expect(f.ground.color.getHexString()).toBe('c9d1bd');
       expect((f.scene.background as THREE.Color).getHexString()).toBe('111b31');
       expect(f.rig.hemisphere.intensity).toBeGreaterThanOrEqual(1);
       expect(f.rig.sun.intensity + f.rig.fill.intensity).toBeGreaterThan(0.9);

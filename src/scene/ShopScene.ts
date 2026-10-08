@@ -282,7 +282,7 @@ export class ShopScene {
     // lower levels move down by the selected floor's real building elevation.
     const floorY = next.exteriorOnly ? 0 : getLevelBaseY(buildingDoc, activeLevel);
     this.ground.position.y = -0.401 - floorY;
-    this.backdrop.configureGround(this.ground, buildingDoc);
+    this.backdrop.configureGround(this.ground);
     const stairOpenings = getStairOpenings(buildingDoc, activeLevel);
     const nextRooftopKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, shop.floorColor, getExterior(buildingDoc), getRoof(buildingDoc), stairOpenings]);
     if (next.rooftopOnly && nextRooftopKey !== this.rooftopKey) {
@@ -1765,6 +1765,7 @@ export class ShopScene {
       }
       helpers.forEach((object) => { if (object) object.visible = false; });
       return this.lighting.capture(() => {
+        this.backdrop.updateGround(this.camera);
         this.backdrop.setNightProgress(this.lighting.nightProgress);
         this.renderer.render(this.scene, this.camera);
         return this.renderer.domElement.toDataURL('image/png');
@@ -1950,7 +1951,7 @@ export class ShopScene {
       this.projectionDirty = true;
       this.refreshDragShadows();
     }
-    if (this.projectionDirty) { this.updateHandles(); this.updateObjectResize(); this.updateItemPlatforms(); this.updateCellMetadata(); }
+    if (this.projectionDirty) { this.backdrop.updateGround(this.camera); this.updateHandles(); this.updateObjectResize(); this.updateItemPlatforms(); this.updateCellMetadata(); }
     // Time-of-day transitions follow elapsed time even on low-frame-rate devices.
     // Only interactive damping above needs a capped delta.
     if (this.lighting.update(elapsed, this.renderDirty)) this.renderDirty = true;
