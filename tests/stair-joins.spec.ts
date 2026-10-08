@@ -21,6 +21,7 @@ function fixture(): ShopDocument {
 async function ready(page: Page) {
   await expect(canvas(page)).toHaveAttribute('data-ready', 'true');
   await expect(page.locator('.shop-canvas')).toHaveAttribute('aria-busy', 'false');
+  await expect.poll(() => page.locator('.scene-loading').evaluate(node => getComputedStyle(node).opacity)).toBe('0');
 }
 
 async function open(page: Page, info: TestInfo) {
@@ -63,9 +64,20 @@ async function expectOpenApproach(page: Page) {
       && bridge.minX < -3.5 && bridge.maxX > -3.5
       && bridge.minZ < 0.7 && bridge.maxZ > 1.09) ?? false;
   }).toBe(true);
+  await expectSideGuards(page);
 }
 
-test('stair approach joins update after adding, moving, resizing and deleting the upper flight', async ({ page }, info) => {
+async function expectSideGuards(page: Page) {
+  // Sample both ends and the middle of both long edges. The front bridge
+  // must not remove either side guard along with the obstructing entry rail.
+  await expect.poll(async () => {
+    const rails = (await data<Rail[]>(page, 'landing-rails'))?.filter(rail => rail.stairId === 'lower-flight') ?? [];
+    return [-3.975, -2.025].every(x => [-2.3, -0.66, 0.98].every(z =>
+      rails.some(rail => rail.minX < x && rail.maxX > x && rail.minZ < z && rail.maxZ > z)));
+  }).toBe(true);
+}
+
+test('stair joins preserve both side guards and clear only the entry after edits', async ({ page }, info) => {
   test.setTimeout(150_000);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -80,7 +92,21 @@ test('stair approach joins update after adding, moving, resizing and deleting th
   const upper = (await stairs(page))[0];
   await expectOpenApproach(page);
   await canvas(page).evaluate(node => node.scrollIntoView({ block: 'center', behavior: 'instant' }));
-  await page.screenshot({ path: info.outputPath('shorter-upper-flight-connected.png'), clip: (await canvas(page).boundingBox())! });
+  if (info.project.name === 'chromium') {
+    const box = (await canvas(page).boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, -500);
+  }
+  if (await button(page, 'Mode malam').getAttribute('aria-pressed') !== 'false') await button(page, 'Mode malam').click();
+  await expect(canvas(page)).toHaveAttribute('data-night-progress', '0');
+  await page.screenshot({ path: info.outputPath('shorter-upper-flight-side-guards-day.png'), clip: (await canvas(page).boundingBox())!, timeout: 30_000 });
+  await button(page, 'Mode malam').click();
+  await expect(canvas(page)).toHaveAttribute('data-night-progress', '1');
+  await expectOpenApproach(page);
+  await page.screenshot({ path: info.outputPath('shorter-upper-flight-side-guards-night.png'), clip: (await canvas(page).boundingBox())!, timeout: 30_000 });
+  await button(page, 'Mode malam').click();
+  await expect(canvas(page)).toHaveAttribute('data-night-progress', '0');
+  if (info.project.name === 'chromium') await button(page, 'Kamera perspektif').click();
 
   await page.getByLabel('Pilih barang di toko', { exact: true }).selectOption(upper.id);
   await button(page, 'Pindahkan barang').click();
@@ -97,7 +123,8 @@ test('stair approach joins update after adding, moving, resizing and deleting th
   await page.getByLabel('Kedalaman barang', { exact: true }).fill('4');
   await page.getByLabel('Kedalaman barang', { exact: true }).press('Enter');
   await expect.poll(async () => (await stairs(page))[0].depth).toBe(4);
-  await expect(canvas(page)).toHaveAttribute('data-landing-guardrails', '0');
+  await expectSideGuards(page);
+  await expect.poll(() => data<Rail[]>(page, 'stair-bridges')).toEqual([]);
   await page.getByLabel('Kedalaman barang', { exact: true }).fill('3');
   await page.getByLabel('Kedalaman barang', { exact: true }).press('Enter');
   await expect.poll(async () => (await stairs(page))[0].depth).toBe(3);

@@ -240,7 +240,7 @@ test('enclosed roof access and resized outdoor covers restore correctly after sw
 
   await button(page, 'Edit lantai 2').click();
   await ready(page, false);
-  await expect(canvas(page)).toHaveAttribute('data-landing-guardrails', '0');
+  await expect.poll(async () => Number(await canvas(page).getAttribute('data-landing-guardrails'))).toBeGreaterThan(0);
   await button(page, 'Eksterior').click();
   await button(page, 'Atap genteng').click();
   await ready(page, false);

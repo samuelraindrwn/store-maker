@@ -32,14 +32,19 @@ describe('roof stair houses and joined landings', () => {
     } finally { disposeGroup(structure); }
   });
 
-  it.each([0, 90, 180, 270] as const)('merges landing rails under an aligned upper flight at rotation %i', rotation => {
+  it.each([0, 90, 180, 270] as const)('clears the crossing rail but preserves side guards beside an aligned upper flight at rotation %i', rotation => {
     const building = fixture(rotation), lower = building.items[0];
     building.upperFloors = [{ ...createEmptyShop(), width: 10, depth: 10, items: [{ ...lower, id: 'next-flight' }] }];
     const rims = buildStairwellRims(building, 1);
     try {
       expect(rims.getObjectByName('stairwell-rim')).toBeDefined();
-      expect(rims.getObjectByName('stairwell-guardrail')).toBeUndefined();
-      expect(rims.getObjectByName('stairwell-guard-post')).toBeUndefined();
+      expect(rims.getObjectByName('stairwell-guardrail')).toBeDefined();
+      expect(rims.getObjectByName('stairwell-guard-post')).toBeDefined();
+      rims.traverse(object => {
+        if (object.name !== 'stairwell-guardrail') return;
+        const size = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3());
+        expect(rotation % 180 === 0 ? size.z > size.x : size.x > size.z).toBe(true);
+      });
     } finally { disposeGroup(rims); }
   });
 

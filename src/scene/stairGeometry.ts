@@ -21,6 +21,17 @@ function expand(rectangle: FloorOpening, margin: number): FloorOpening {
   return { minX: rectangle.minX - margin, maxX: rectangle.maxX + margin, minZ: rectangle.minZ - margin, maxZ: rectangle.maxZ + margin };
 }
 
+/** A crossing rail blocks the whole passage; a parallel rail only conflicts
+ * when it runs through its interior, not alongside its exposed outer edge. */
+function railPassage(rectangle: FloorOpening, alongZ: boolean, horizontalRail: boolean, margin: number, sideInset: number): FloorOpening {
+  const cut = expand(rectangle, margin);
+  if (horizontalRail !== alongZ) {
+    if (alongZ) { cut.minX = rectangle.minX + sideInset; cut.maxX = rectangle.maxX - sideInset; }
+    else { cut.minZ = rectangle.minZ + sideInset; cut.maxZ = rectangle.maxZ - sideInset; }
+  }
+  return cut;
+}
+
 /** Keep only continuous strips of the authored floor, including concave outlines. */
 function supportedApproaches(rectangle: FloorOpening, alongZ: boolean, cells: readonly FloorOpening[]): FloorOpening[] {
   const minAcross = alongZ ? rectangle.minX : rectangle.minZ, maxAcross = alongZ ? rectangle.maxX : rectangle.maxZ;
@@ -94,14 +105,17 @@ export function buildStairwellRims(building: ShopDocument, activeLevel: number, 
   if (!Number.isInteger(activeLevel) || activeLevel <= 0 || activeLevel > count) return group;
   const current = activeLevel === count ? getRooftopDocument(building) : getLevelDocument(building, activeLevel), openings = getStairOpenings(building, activeLevel);
   const cells = getFloorCells(current).map(cell => ({ minX: cell.x - current.width / 2, maxX: cell.x + 1 - current.width / 2, minZ: cell.z - current.depth / 2, maxZ: cell.z + 1 - current.depth / 2 }));
-  // An upper flight supplies its own railing. Trim landing rails beneath that
-  // flight, including the first-step approach, instead of stacking both sets.
+  // Remove rails crossing an upper flight or its first-step approach. Its
+  // sloping handrails do not replace the horizontal guards beside the hole.
   const flights = current.items.filter(item => item.kind === 'stairs').map(item => {
     const size = getItemFootprint(item);
-    return { item, rectangle: { minX: item.x - current.width / 2, maxX: item.x - current.width / 2 + size.width,
+    return { item, alongZ: item.rotation % 180 === 0, rectangle: { minX: item.x - current.width / 2, maxX: item.x - current.width / 2 + size.width,
       minZ: item.z - current.depth / 2, maxZ: item.z - current.depth / 2 + size.depth } };
   });
-  const upperFlights = flights.map(flight => expand(flight.rectangle, 0.09));
+  const flightCuts = (horizontalRail: boolean) => flights.map(({ item, rectangle, alongZ }) =>
+    // Treads occupy 90% of the authored width; leave the outer side strip for
+    // a guard, with a small clearance beside the real tread edge.
+    railPassage(rectangle, alongZ, horizontalRail, 0.09, getItemSize(item).width * 0.05 - 0.01));
   const addBox = (parent: THREE.Group, name: string, rectangle: FloorOpening, height: number, y: number, color: string) => {
     const geometry = new THREE.BoxGeometry(rectangle.maxX - rectangle.minX, height, rectangle.maxZ - rectangle.minZ);
     const object = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: 0.8 }));
@@ -142,7 +156,8 @@ export function buildStairwellRims(building: ShopDocument, activeLevel: number, 
       if (!bridge) return [];
       return supportedApproaches(bridge, alongZ, cells).map(rectangle => ({ rectangle, alongZ, side, upperStairId: item.id }));
     });
-    const approachCuts = approaches.map(({ rectangle }) => expand(rectangle, thickness + 0.001));
+    const approachCuts = (horizontalRail: boolean) => approaches.map(({ rectangle, alongZ }) =>
+      railPassage(rectangle, alongZ, horizontalRail, thickness + 0.001, thickness + 0.001));
     landing.userData.entryBridges = approaches.map(({ rectangle, upperStairId }) => ({ ...rectangle, upperStairId }));
     for (const approach of approaches) {
       for (const cell of cells) {
@@ -173,7 +188,7 @@ export function buildStairwellRims(building: ShopDocument, activeLevel: number, 
         const neighbor = approach.alongZ ? { ...side, minX: edge + (index ? 0.00001 : -thickness), maxX: edge + (index ? thickness : -0.00001) }
           : { ...side, minZ: edge + (index ? 0.00001 : -thickness), maxZ: edge + (index ? thickness : -0.00001) };
         const coveredNeighbors = approaches.filter(other => other !== approach && overlap(other.rectangle, neighbor)).map(other => expand(other.rectangle, thickness));
-        for (const part of subtractFloorOpenings(side, [...upperFlights, ...coveredNeighbors])) addGuard(landing, part, !approach.alongZ, true);
+        for (const part of subtractFloorOpenings(side, [...flightCuts(!approach.alongZ), ...coveredNeighbors])) addGuard(landing, part, !approach.alongZ, true);
       }
     }
     const edges: { side: StairOpening['exitSide']; rectangle: FloorOpening }[] = [
@@ -188,7 +203,8 @@ export function buildStairwellRims(building: ShopDocument, activeLevel: number, 
       for (const part of subtractFloorOpenings(intersection, openings)) {
         addBox(landing, 'stairwell-rim', part, 0.035, 0.042, '#b7a185');
         if (side === hole.exitSide || options.guardRails === false) continue;
-        for (const railPart of subtractFloorOpenings(part, [...upperFlights, ...approachCuts])) addGuard(landing, railPart, side === 'north' || side === 'south');
+        const horizontal = side === 'north' || side === 'south';
+        for (const railPart of subtractFloorOpenings(part, [...flightCuts(horizontal), ...approachCuts(horizontal)])) addGuard(landing, railPart, horizontal);
       }
     }
   }
