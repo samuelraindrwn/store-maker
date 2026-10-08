@@ -55,6 +55,7 @@ export default function App() {
   const activeLevel = Math.min(requestedLevel, levelCount - 1);
   const shop = getLevelDocument(building, activeLevel);
   const [exteriorOnly, setExteriorOnly] = useState(false);
+  const [sceneRevision, setSceneRevision] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [placement, setPlacement] = useState<ShopItem | null>(null);
   const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
@@ -143,6 +144,9 @@ export default function App() {
   };
   const switchExterior = (enabled: boolean) => {
     clearSelection(); setExteriorOnly(enabled); setView('orbit'); setCameraReset(value => value + 1);
+    // Recreate the imperative renderer even when reselecting the current mode.
+    // A tab kept open across updates must not retain a stale WebGL scene.
+    setSceneRevision(value => value + 1);
   };
   const changeLevelCount = (count: number) => {
     const next = setLevelCount(building, count);
@@ -377,7 +381,7 @@ export default function App() {
           </div>}
           <section className={`scene-panel ${placement || wallPlacement ? 'is-placing' : ''} ${editMode === 'build' && !preview ? 'is-building' : ''} ${showCity ? 'with-city' : ''} ${nightMode ? 'is-night' : ''}`} data-testid="scene" aria-label="Toko 3D interaktif">
             <div className="scene-topline"><span className="scene-badge">{nightMode ? <Moon size={12} /> : <span className="live-dot" />}{exteriorOnly ? 'EKSTERIOR TOKOMU' : nightMode ? 'MALAM DI TOKOMU' : preview ? 'TOKOMU, VERSI KAMU' : 'RUANG KREATIF'}</span><span className="scene-dimensions">{exteriorOnly ? levelCount : floorCount}<span>{exteriorOnly ? ' LANTAI' : ` PETAK / LT ${activeLevel + 1}`}</span></span></div>
-            <ShopCanvas ref={scene} shop={shop} building={building} activeLevel={activeLevel} exteriorOnly={exteriorOnly} selectedId={selectedId} placement={placement} selectedWallId={selectedWallId} selectedDoor={selectedDoor} wallPlacement={wallPlacement} resizeMode={resizeMode} showGrid={showGrid && !preview} showWalls={showWalls} showCity={showCity} nightMode={nightMode} editMode={editMode} buildTool={buildTool} preview={preview} onSelect={selectItem} onSelectWall={selectWallItem} onSelectDoor={selectDoor} onCell={placeAt} onHover={hoverCell} onWallPlace={placeWallAt} onWallHover={hoverWall} onChange={commitGesture} onInteraction={setInteraction} />
+            <ShopCanvas key={`${exteriorOnly ? 'exterior' : 'interior'}-${sceneRevision}`} ref={scene} shop={shop} building={building} activeLevel={activeLevel} exteriorOnly={exteriorOnly} selectedId={selectedId} placement={placement} selectedWallId={selectedWallId} selectedDoor={selectedDoor} wallPlacement={wallPlacement} resizeMode={resizeMode} showGrid={showGrid && !preview} showWalls={showWalls} showCity={showCity} nightMode={nightMode} editMode={editMode} buildTool={buildTool} preview={preview} onSelect={selectItem} onSelectWall={selectWallItem} onSelectDoor={selectDoor} onCell={placeAt} onHover={hoverCell} onWallPlace={placeWallAt} onWallHover={hoverWall} onChange={commitGesture} onInteraction={setInteraction} />
             {interaction && !preview && <div className="interaction-hud" aria-live="off"><Move size={16} /><span>{interaction}</span><kbd>Esc</kbd></div>}
             {preview && <div className="preview-label"><span className="eyebrow">DIBUAT DENGAN SEDIKIT IMAJINASI</span><h2>{building.name || 'Toko Kecilku'}</h2><div className="preview-actions"><button className="button button-dark" onClick={takePhoto}><Camera size={16} />Ambil foto toko</button>{!exteriorOnly && activeLevel === 0 && floorCount > 0 && <button className="button button-light" aria-label={entrance.open ? 'Tutup pintu masuk' : 'Buka pintu masuk'} onClick={() => commit(setEntrance(shop, { open: !entrance.open }))}><DoorOpen size={16} />{entrance.open ? 'Tutup pintu' : 'Buka pintu'}</button>}</div></div>}
             <div className="scene-controls">

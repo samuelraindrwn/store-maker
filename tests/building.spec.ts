@@ -153,3 +153,36 @@ test('legacy single-floor design is preserved and utility catalog places on the 
   await noOverflow(page);
   expect(errors).toEqual([]);
 });
+
+test('legacy one-floor exterior recreates the canvas, repaints, and can recover by reselecting the mode', async ({ page }, info) => {
+  test.setTimeout(90_000);
+  const legacy = createInitialShop();
+  delete legacy.upperFloors;
+  delete legacy.roof;
+  delete legacy.exterior;
+  legacy.items = legacy.items.filter(item => item.kind !== 'stairs' && item.kind !== 'bathroom');
+  legacy.items.find(item => item.id === 'green-corner')!.z = 2;
+  const errors = await open(page, info, legacy);
+  const first = await canvas(page).elementHandle();
+  const interior = await canvas(page).screenshot();
+  await button(page, 'Eksterior').click();
+  await expect.poll(() => first!.evaluate(node => node.isConnected)).toBe(false);
+  await expect(canvas(page)).toHaveAttribute('data-ready', 'true');
+  await expect(canvas(page)).toHaveAttribute('data-exterior-only', 'true');
+  await expect(canvas(page)).toHaveAttribute('data-item-centers', '[]');
+  const exterior = await canvas(page).screenshot({ path: info.outputPath('legacy-exterior.png') });
+  expect(exterior.equals(interior)).toBe(false);
+  expect(await saved(page)).toEqual(legacy);
+  const second = await canvas(page).elementHandle();
+  await button(page, 'Eksterior').click();
+  await expect.poll(() => second!.evaluate(node => node.isConnected)).toBe(false);
+  await expect(canvas(page)).toHaveAttribute('data-ready', 'true');
+  await expect(canvas(page)).toHaveAttribute('data-exterior-only', 'true');
+  await button(page, 'Interior').click();
+  await expect(canvas(page)).toHaveAttribute('data-ready', 'true');
+  await expect(canvas(page)).toHaveAttribute('data-exterior-only', 'false');
+  await expect.poll(async () => JSON.parse(await canvas(page).getAttribute('data-item-centers') || '[]').length).toBe(11);
+  expect(await saved(page)).toEqual(legacy);
+  await expect(button(page, 'Urungkan')).toBeDisabled();
+  expect(errors).toEqual([]);
+});
