@@ -107,7 +107,7 @@ describe('movable wall accessories and structural openings', () => {
       expect(bounds.max.x).toBeLessThanOrEqual(entry.width / 2 + 0.001);
       expect(bounds.min.y).toBeGreaterThanOrEqual(-entry.height / 2 - 0.001);
       expect(bounds.max.y).toBeLessThanOrEqual(entry.height / 2 + 0.001);
-      expect(bounds.min.z).toBeGreaterThanOrEqual(-0.05);
+      expect(bounds.min.z).toBeGreaterThanOrEqual(entry.kind === 'window' ? -0.201 : -0.05);
       expect(bounds.max.z).toBeGreaterThan(0.05);
       group.traverse(object => {
         expect(object.userData.wallItemId).toBe(item.id);

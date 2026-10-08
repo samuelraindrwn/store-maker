@@ -107,7 +107,7 @@ describe('resized wall accessories and real window openings', () => {
         expect(bounds.min.y).toBeGreaterThanOrEqual(-size.height / 2 - 0.001);
         expect(bounds.max.y).toBeLessThanOrEqual(size.height / 2 + 0.001);
         expect(bounds.max.z).toBeLessThanOrEqual(getWallItemSize(item).depth + 0.001);
-        expect(bounds.min.z).toBeGreaterThanOrEqual(-0.05);
+        expect(bounds.min.z).toBeGreaterThanOrEqual(entry.kind === 'window' ? -0.201 : -0.05);
       } finally { disposeGroup(group); }
     });
   }

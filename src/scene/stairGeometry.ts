@@ -55,12 +55,19 @@ export function getStairOpenings(building: ShopDocument, activeLevel: number): S
 }
 
 /** A rim and three open guard rails make the actual void legible, never cover it. */
-export function buildStairwellRims(building: ShopDocument, activeLevel: number) {
+export function buildStairwellRims(building: ShopDocument, activeLevel: number, options: { guardRails?: boolean } = {}) {
   const group = new THREE.Group(); group.name = 'stair-landings';
   const count = getLevelCount(building);
   if (!Number.isInteger(activeLevel) || activeLevel <= 0 || activeLevel > count) return group;
   const current = activeLevel === count ? getRooftopDocument(building) : getLevelDocument(building, activeLevel), openings = getStairOpenings(building, activeLevel);
   const cells = getFloorCells(current).map(cell => ({ minX: cell.x - current.width / 2, maxX: cell.x + 1 - current.width / 2, minZ: cell.z - current.depth / 2, maxZ: cell.z + 1 - current.depth / 2 }));
+  // An upper flight supplies its own railing. Trim landing rails beneath that
+  // flight, including the first-step approach, instead of stacking both sets.
+  const upperFlights = current.items.filter(item => item.kind === 'stairs').map(item => {
+    const size = getItemFootprint(item);
+    return { minX: item.x - current.width / 2 - 0.09, maxX: item.x - current.width / 2 + size.width + 0.09,
+      minZ: item.z - current.depth / 2 - 0.09, maxZ: item.z - current.depth / 2 + size.depth + 0.09 };
+  });
   const addBox = (parent: THREE.Group, name: string, rectangle: FloorOpening, height: number, y: number, color: string) => {
     const geometry = new THREE.BoxGeometry(rectangle.maxX - rectangle.minX, height, rectangle.maxZ - rectangle.minZ);
     const object = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: 0.8 }));
@@ -82,15 +89,17 @@ export function buildStairwellRims(building: ShopDocument, activeLevel: number) 
       const intersection = { minX: Math.max(rectangle.minX, cell.minX), maxX: Math.min(rectangle.maxX, cell.maxX), minZ: Math.max(rectangle.minZ, cell.minZ), maxZ: Math.min(rectangle.maxZ, cell.maxZ) };
       for (const part of subtractFloorOpenings(intersection, openings)) {
         addBox(landing, 'stairwell-rim', part, 0.035, 0.042, '#b7a185');
-        if (side === hole.exitSide) continue;
-        addBox(landing, 'stairwell-guardrail', part, 0.055, 0.77, '#ae8861');
-        const horizontal = side === 'north' || side === 'south';
-        const length = horizontal ? part.maxX - part.minX : part.maxZ - part.minZ;
-        if (length < 0.07) continue;
-        for (const t of [0.08, 0.92]) {
-          const x = horizontal ? part.minX + length * t : (part.minX + part.maxX) / 2;
-          const z = horizontal ? (part.minZ + part.maxZ) / 2 : part.minZ + length * t;
-          addBox(landing, 'stairwell-guard-post', { minX: x - 0.018, maxX: x + 0.018, minZ: z - 0.018, maxZ: z + 0.018 }, 0.70, 0.40, '#746a65');
+        if (side === hole.exitSide || options.guardRails === false) continue;
+        for (const railPart of subtractFloorOpenings(part, upperFlights)) {
+          addBox(landing, 'stairwell-guardrail', railPart, 0.055, 0.77, '#ae8861');
+          const horizontal = side === 'north' || side === 'south';
+          const length = horizontal ? railPart.maxX - railPart.minX : railPart.maxZ - railPart.minZ;
+          if (length < 0.07) continue;
+          for (const t of [0.08, 0.92]) {
+            const x = horizontal ? railPart.minX + length * t : (railPart.minX + railPart.maxX) / 2;
+            const z = horizontal ? (railPart.minZ + railPart.maxZ) / 2 : railPart.minZ + length * t;
+            addBox(landing, 'stairwell-guard-post', { minX: x - 0.018, maxX: x + 0.018, minZ: z - 0.018, maxZ: z + 0.018 }, 0.70, 0.40, '#746a65');
+          }
         }
       }
     }

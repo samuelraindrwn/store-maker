@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { getExterior, getFloorBounds, getFloorCells, getItemFootprint, getLevelCount, getLevelDocument, getRoof, getRooftopDocument, getWallHeight, getWallItems, wallItemPosition, type ShopDocument } from '../model';
+import { getExterior, getFloorBounds, getFloorCells, getItemFootprint, getLevelCount, getLevelDocument, getRoof, getRooftopDocument, getWallHeight, getWallItemMount, getWallItems, wallItemPosition, type ShopDocument } from '../model';
 import { applyWallItemSize, box, buildContourFloor, buildItem, buildRoom, buildWallItem, disposeGroup } from './objects';
+import { applyExteriorWallMaterial } from './exteriorMaterials';
 import { getItemSupport } from './itemSupport';
 import { buildStairwellRims, getStairOpenings } from './stairGeometry';
 
@@ -13,6 +14,13 @@ export function getLevelBaseY(building: ShopDocument, level: number): number {
   let base = 0;
   for (let lower = 0; lower < level; lower++) base += getWallHeight(getLevelDocument(building, lower)) + LEVEL_SLAB;
   return base;
+}
+
+/** Retained legacy/manual stairs under a tiled roof must stay below its slab. */
+export function getStairRise(building: ShopDocument, level: number): number {
+  const height = getWallHeight(getLevelDocument(building, level));
+  return level === getLevelCount(building) - 1 && getRoof(building).style === 'tiles'
+    ? height - 0.86 : height + LEVEL_SLAB;
 }
 
 /** Each level has its own grid origin: frame their union in shared world coordinates. */
@@ -29,7 +37,7 @@ export function getBuildingBounds(building: ShopDocument) {
   }
   const roof = getRoof(building), topWidth = getFloorBounds(getLevelDocument(building, count - 1)).width;
   // The terrace can hold the whole furniture catalog, including tall racks.
-  height += roof.style === 'tiles' ? Math.min(2.1, topWidth * 0.26) : getRooftopDocument(building).items.length ? 2.8 : 0.84;
+  height += roof.style === 'tiles' ? Math.min(2.1, topWidth * 0.26) : Math.max(getRooftopDocument(building).items.length ? 2.8 : 0.84, roof.stairAccess === 'enclosed' ? 2.4 : 0);
   return { minX, maxX, minZ, maxZ, width: maxX - minX, depth: maxZ - minZ, centerX: (minX + maxX) / 2, centerZ: (minZ + maxZ) / 2, height };
 }
 
@@ -90,7 +98,43 @@ export function buildRooftopStructure(building: ShopDocument) {
     box(rail, length + 0.15, 0.08, 0.23, facade.trimColor, 0, 0.74, 0).name = 'rooftop-parapet-cap';
     parapets.add(rail);
   }
-  group.add(buildStairwellRims(building, getLevelCount(building)));
+  const enclosed = getRoof(building).stairAccess === 'enclosed';
+  group.add(buildStairwellRims(building, getLevelCount(building), { guardRails: !enclosed }));
+  if (enclosed) group.add(buildRooftopStairEnclosures(building));
+  return group;
+}
+
+/** A small weatherproof stair house with a real, open doorway at the upper exit. */
+export function buildRooftopStairEnclosures(building: ShopDocument) {
+  const group = new THREE.Group(); group.name = 'rooftop-stair-enclosures';
+  const facade = getExterior(building);
+  for (const hole of getStairOpenings(building, getLevelCount(building))) {
+    const alongZ = hole.exitSide === 'north' || hole.exitSide === 'south';
+    const width = alongZ ? hole.maxX - hole.minX : hole.maxZ - hole.minZ;
+    const depth = alongZ ? hole.maxZ - hole.minZ : hole.maxX - hole.minX;
+    const house = new THREE.Group(); house.name = `stair-access-enclosure:${hole.stairId}`;
+    house.userData.stairOpening = hole; house.userData.stairAccess = 'enclosed';
+    house.position.set((hole.minX + hole.maxX) / 2, 0, (hole.minZ + hole.maxZ) / 2);
+    house.rotation.y = { north: 0, east: -Math.PI / 2, south: Math.PI, west: Math.PI / 2 }[hole.exitSide];
+    const thickness = Math.min(0.06, width * 0.028);
+    const wallHeight = 2.22, doorHeight = 1.98, doorWidth = Math.min(1.05, width - 0.18);
+    for (const x of [-width / 2 - 0.004, width / 2 + 0.004]) box(house, thickness, wallHeight, depth + thickness, facade.wallColor, x, wallHeight / 2 + 0.04, 0).name = 'stair-access-side-wall';
+    box(house, width, wallHeight, thickness, facade.wallColor, 0, wallHeight / 2 + 0.04, depth / 2 + 0.004).name = 'stair-access-back-wall';
+    const shoulder = (width - doorWidth) / 2, exitZ = -depth / 2 - 0.004;
+    for (const x of [-doorWidth / 2 - shoulder / 2, doorWidth / 2 + shoulder / 2]) box(house, shoulder, wallHeight, thickness, facade.wallColor, x, wallHeight / 2 + 0.04, exitZ).name = 'stair-access-door-jamb';
+    box(house, doorWidth, wallHeight - doorHeight, thickness, facade.wallColor, 0, doorHeight + (wallHeight - doorHeight) / 2 + 0.04, exitZ).name = 'stair-access-door-header';
+    for (const x of [-doorWidth / 2, doorWidth / 2]) box(house, 0.045, doorHeight + 0.03, thickness + 0.025, facade.trimColor, x, doorHeight / 2 + 0.04, exitZ).name = 'stair-access-door-frame';
+    box(house, doorWidth + 0.05, 0.05, thickness + 0.025, facade.trimColor, 0, doorHeight + 0.04, exitZ).name = 'stair-access-door-frame';
+    const door = new THREE.Group(); door.name = 'stair-access-open-door';
+    door.position.set(-doorWidth / 2, 0.04, exitZ); door.rotation.y = Math.PI * 0.44;
+    box(door, doorWidth - 0.04, doorHeight - 0.04, 0.035, facade.trimColor, doorWidth / 2, doorHeight / 2, 0).name = 'stair-access-door-leaf';
+    box(door, doorWidth - 0.18, doorHeight * 0.54, 0.012, '#C5D9D4', doorWidth / 2, doorHeight * 0.63, -0.025).name = 'stair-access-door-window';
+    box(door, 0.045, 0.13, 0.05, '#D5BD81', doorWidth - 0.12, 0.96, -0.04).name = 'stair-access-door-handle';
+    house.add(door);
+    box(house, width + thickness + 0.018, 0.12, depth + 0.08, facade.trimColor, 0, wallHeight + 0.10, 0).name = 'stair-access-roof';
+    box(house, width + thickness, 0.02, depth + 0.06, '#EFE5D2', 0, wallHeight + 0.17, 0).name = 'stair-access-roof-cap';
+    group.add(house);
+  }
   return group;
 }
 
@@ -151,7 +195,7 @@ function buildTiledRoof(building: ShopDocument, shop: ShopDocument, base: number
 
 /** Both exterior and floor context use fresh, disposable copies of the authored layout. */
 function buildAuthoredLevel(building: ShopDocument, level: number, options: { showCity?: boolean; exterior?: boolean }) {
-  const shop = getLevelDocument(building, level), height = getWallHeight(shop), floor = new THREE.Group();
+  const shop = getLevelDocument(building, level), floor = new THREE.Group();
   const facade = getExterior(building), base = getLevelBaseY(building, level);
   const prefix = options.exterior ? 'exterior' : 'interior-context';
   floor.name = `${prefix}-level:${level + 1}`; floor.position.y = base; floor.userData.level = level; floor.userData.floorY = base;
@@ -162,14 +206,11 @@ function buildAuthoredLevel(building: ShopDocument, level: number, options: { sh
   room.group.name = `${prefix}-room`; floor.add(room.group);
   if (level > 0) floor.add(buildStairwellRims(building, level));
   if (options.exterior) {
-    room.walls.traverse(object => {
-      if (object.userData.wallCoping && object instanceof THREE.Mesh && object.material instanceof THREE.MeshStandardMaterial) {
-        object.material.color.set(facade.trimColor);
-      }
-    });
+    applyExteriorWallMaterial(room.walls, facade);
   }
   if (level > 0) disposeGroup(room.entrance);
   for (const item of getWallItems(shop)) {
+    if (item.kind !== 'window' && getWallItemMount(item) !== (options.exterior ? 'exterior' : 'interior')) continue;
     const object = buildWallItem(item, shop), point = wallItemPosition(shop, item);
     applyWallItemSize(object, item);
     object.position.set(point.x, point.y, point.z); object.rotation.y = point.rotation;
@@ -179,7 +220,7 @@ function buildAuthoredLevel(building: ShopDocument, level: number, options: { sh
   }
   // Saved furniture remains visible through glass, stairwells and the cutaway.
   for (const item of shop.items) {
-    const object = buildItem(item, height + LEVEL_SLAB), footprint = getItemFootprint(item);
+    const object = buildItem(item, getStairRise(building, level)), footprint = getItemFootprint(item);
     const support = level === 0 ? getItemSupport(shop, item, room.floor, room.entrance, options.showCity ?? true) : { baseY: 0.038 };
     object.position.set(item.x - shop.width / 2 + footprint.width / 2, support.baseY, item.z - shop.depth / 2 + footprint.depth / 2);
     object.rotation.y = -THREE.MathUtils.degToRad(item.rotation); floor.add(object);

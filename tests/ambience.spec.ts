@@ -248,8 +248,8 @@ test('music autoplays with real audio, preserves volume and editor behavior, and
 });
 });
 
-test('the same native music loop continues through exterior, interior, floor and rooftop changes', async ({ page }, info) => {
-  test.setTimeout(90_000);
+test('the same native music loop continues through view changes and automatic day and night', async ({ page }, info) => {
+  test.setTimeout(120_000);
   const errors = await openApp(page, info);
   await outsidePointer(page);
   await expectPlaying(page);
@@ -259,6 +259,8 @@ test('the same native music loop continues through exterior, interior, floor and
     probe.retainedLoop = active;
     return Boolean(active);
   })).toBe(true);
+  await button(page, 'Eksterior').click();
+  await button(page, 'Rooftop').click();
   await button(page, 'Edit rooftop').click();
   await expect(page.locator('.shop-canvas')).toHaveAttribute('aria-busy', 'false');
   const original = await saved(page);
@@ -281,6 +283,16 @@ test('the same native music loop continues through exterior, interior, floor and
     });
     expect(state).toMatchObject({ starts: 1, stops: 0, contexts: 1, running: 'running', activeLoops: 1 });
     expect(state.time).toBeGreaterThan(start);
+  }
+  const epoch = await page.evaluate(() => Number(localStorage.getItem('nemu.store-maker.day-night-epoch')));
+  for (const phase of [1, 2]) {
+    await page.clock.setFixedTime(new Date(epoch + phase * 20 * 60_000));
+    await expect(canvasFor(page)).toHaveAttribute('data-lighting-mode', phase === 1 ? 'night' : 'day');
+    await expectPlaying(page);
+    expect(await withoutGesture(page, () => {
+      const retained = (window as unknown as ProbeWindow).__cozyAudioProbe.retainedLoop!;
+      return { starts: retained.starts, stops: retained.stops, state: retained.source.context.state };
+    })).toEqual({ starts: 1, stops: 0, state: 'running' });
   }
   expect(await saved(page)).toEqual(original);
   expect(errors).toEqual([]);

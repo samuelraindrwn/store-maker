@@ -1,0 +1,20 @@
+.time-of-day-control{position:relative;display:flex;align-items:center;flex-shrink:0;pointer-events:auto}
+.time-of-day-control .night-mode-toggle{position:relative}
+.time-auto-indicator{position:absolute;right:1px;bottom:1px;min-width:10px;line-height:11px;border-radius:3px;background:#f7f1df;color:#92743b;font-size:8px;font-weight:900;text-align:center;box-shadow:0 0 0 1px #fff9}
+.night-mode-toggle.active .time-auto-indicator{background:#eee7fb;color:#7153a2}
+.view-controls .time-of-day-control .time-mode-trigger{display:flex;align-items:center;justify-content:center;gap:3px;width:54px;min-width:54px;padding:0 3px;color:#8b7c9b}
+.time-game-clock{font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;font-feature-settings:"tnum";letter-spacing:-.2px;white-space:nowrap}
+.time-mode-trigger[aria-expanded=true] svg{transform:rotate(180deg)}
+.time-mode-popover{position:absolute;bottom:calc(100% + 12px);left:0;z-index:6;width:220px;max-width:calc(100vw - 52px);padding:14px;border:1px solid #e3daec;border-radius:14px;background:#fffdfb;color:#7d6c8e;box-shadow:0 10px 30px #3923481f;touch-action:auto}
+.time-mode-heading{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.time-mode-heading strong{font-size:11px;font-weight:800;color:#554263}
+.time-mode-heading>span{margin-left:auto;font-size:9px;color:#9882a5}
+.time-mode-popover p{font-size:10px;line-height:1.6;margin:9px 0 10px;color:#98899f}
+.time-mode-options{display:flex;flex-direction:column;gap:4px}
+.time-mode-options button{display:flex;align-items:center;gap:9px;width:100%;min-height:35px;padding:8px 10px;border-radius:8px;background:transparent;color:#897696;text-align:left;font-size:11px;font-weight:700}
+.time-mode-options button>svg{flex-shrink:0}
+.time-mode-options button>svg:last-child:not(:first-child){margin-left:auto}
+.time-mode-options button:hover{background:#f5effb;color:#7955ad}
+.time-mode-options button[aria-pressed=true]{background:#eee7fb;color:#7852b5}
+.time-of-day-control button:focus-visible{outline:2px solid #8d65d4;outline-offset:-2px}
+@media(max-width:390px){.view-controls .time-of-day-control .time-mode-trigger{width:51px;min-width:51px;gap:1px}.time-game-clock{font-size:10px}.time-mode-popover{width:216px;padding:12px}}

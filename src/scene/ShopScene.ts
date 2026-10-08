@@ -8,8 +8,13 @@ import { FloorPainter, floorOutline, strokeCells, workCells } from './interactio
 import { intersectWall, intersectWallPlane, wallFrame } from './interactionWalls';
 import { ObjectResizeTools, resizeFloorEdge, resizeFloorToTile, resizeWallEdge, resizeWallToTile, type ResizeEdge } from './interactionObjectResize';
 import { getItemSupport } from './itemSupport';
+import { getWallItemMount } from '../model';
 import { NightLighting } from './lighting';
-import { buildBuilding, buildInteriorContext, buildRooftopStructure, buildStairLandings, getBuildingBounds, getLevelBaseY, LEVEL_SLAB } from './buildingObjects';
+import { setWallClockTime } from './wallClock';
+import { getCityPedestrianState, setCityTimeOfDay, updateCityPedestrians } from './city';
+import { applyExteriorWallMaterial } from './exteriorMaterials';
+import { CozyBackdrop } from './CozyBackdrop';
+import { buildBuilding, buildInteriorContext, buildRooftopStructure, buildStairLandings, getBuildingBounds, getLevelBaseY, getStairRise, LEVEL_SLAB } from './buildingObjects';
 import { getStairOpenings } from './stairGeometry';
 import { canPlaceLevelItem, canPlaceRooftop, getLevelCount, getLevelDocument, getRoof, getRooftopDocument } from '../model';
 import { canPlacePartition, getEntranceWall, getInteriorDoors, getPartitions, getPartitionPosition, placePartition, wallIsHorizontal, type PartitionWall, type WallSide } from '../model';
@@ -126,6 +131,9 @@ export class ShopScene {
   private readonly resizeObserver: ResizeObserver;
   private readonly ground: THREE.Mesh;
   private readonly lighting: NightLighting;
+  private readonly backdrop = new CozyBackdrop();
+  private gameMinutes = 360;
+  private clocks: THREE.Object3D[] = [];
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private state: SceneState | null = null;
   private room: THREE.Group | null = null;
@@ -221,7 +229,7 @@ export class ShopScene {
     this.itemPlatforms.frustumCulled = false;
     this.itemPlatforms.raycast = () => undefined;
     this.itemPlatforms.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.scene.add(this.ground, this.items, this.wallItems, this.itemPlatforms, this.handles.group, this.painter.group, this.objectResize.group);
+    this.scene.add(this.backdrop.mesh, this.ground, this.items, this.wallItems, this.itemPlatforms, this.handles.group, this.painter.group, this.objectResize.group);
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.095;
@@ -261,7 +269,7 @@ export class ShopScene {
     const previousFloorY = this.activeFloorY();
     if (this.gesture && (exteriorChanged || levelChanged || getLevelCount(buildingDoc) !== getLevelCount(this.state!.building ?? this.state!.shop))) this.cancelGesture();
     // Exterior camera navigation never claims furniture/build gestures.
-    if (next.exteriorOnly) next = { ...next, preview: true, placement: null, wallPlacement: null, selectedId: null, selectedWallId: null, selectedDoor: false, resizeMode: false };
+    if (next.exteriorOnly) next = { ...next, placement: null, selectedId: null, selectedDoor: next.selectedDoor && (next.activeLevel ?? 0) === 0, selectedPartitionId: null, editMode: 'arrange' };
     if (next.rooftopOnly) next = { ...next, editMode: 'arrange', wallPlacement: null, selectedWallId: null, selectedDoor: false, selectedPartitionId: null };
     if (this.gesture && (next.shop !== this.state?.shop || next.editMode !== this.state?.editMode || next.buildTool !== this.state?.buildTool || next.preview !== this.state?.preview || next.placement !== this.state?.placement || next.wallPlacement !== this.state?.wallPlacement || next.showWalls !== this.state?.showWalls || next.showAllWalls !== this.state?.showAllWalls || next.resizeMode !== this.state?.resizeMode || next.selectedId !== this.state?.selectedId || next.selectedWallId !== this.state?.selectedWallId)) this.cancelGesture();
     this.resizeHover = null;
@@ -274,8 +282,9 @@ export class ShopScene {
     // lower levels move down by the selected floor's real building elevation.
     const floorY = next.exteriorOnly ? 0 : getLevelBaseY(buildingDoc, activeLevel);
     this.ground.position.y = -0.401 - floorY;
+    this.backdrop.configureGround(this.ground, buildingDoc);
     const stairOpenings = getStairOpenings(buildingDoc, activeLevel);
-    const nextRooftopKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, shop.floorColor, getExterior(buildingDoc), stairOpenings]);
+    const nextRooftopKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, shop.floorColor, getExterior(buildingDoc), getRoof(buildingDoc), stairOpenings]);
     if (next.rooftopOnly && nextRooftopKey !== this.rooftopKey) {
       if (this.rooftop) disposeGroup(this.rooftop);
       this.rooftop = buildRooftopStructure(buildingDoc);
@@ -286,13 +295,15 @@ export class ShopScene {
     if (this.rooftop) this.rooftop.visible = !!next.rooftopOnly && !next.exteriorOnly;
     let lightingContentChanged = exteriorChanged;
     this.lighting.setMode(next.nightMode ?? false, firstShop || this.reducedMotion.matches);
-    const nextRoomKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, this.windowKey(getWallItems(shop)), getWallHeight(shop), getEntrance(shop).position, getEntranceWall(shop), getEntranceRotation(shop), getExterior(shop).awning, shop.floorColor, shop.wallColor, shop.name, activeLevel, stairOpenings, getPartitions(shop), getInteriorDoors(shop)]);
+    const nextRoomKey = JSON.stringify([next.exteriorOnly, getExterior(buildingDoc), shop.width, shop.depth, shop.floorCells, this.windowKey(getWallItems(shop)), getWallHeight(shop), getEntrance(shop).position, getEntranceWall(shop), getEntranceRotation(shop), getExterior(shop).awning, shop.floorColor, shop.wallColor, shop.name, activeLevel, stairOpenings, getPartitions(shop), getInteriorDoors(shop)]);
     if (nextRoomKey !== this.roomKey) {
       const previousDoorAngle = this.builtRoom?.doorPivot.rotation.y;
       if (this.room) disposeGroup(this.room);
-      const built = buildRoom(shop, { slabDepth: activeLevel > 0 ? LEVEL_SLAB : undefined, floorOpenings: stairOpenings, hasEntrance: activeLevel === 0 });
+      const built = buildRoom(next.exteriorOnly ? { ...shop, wallColor: getExterior(buildingDoc).wallColor, exterior: getExterior(buildingDoc) } : shop, { enclosed: next.exteriorOnly, slabDepth: activeLevel > 0 ? LEVEL_SLAB : undefined, floorOpenings: stairOpenings, hasEntrance: activeLevel === 0 });
       this.builtRoom = built;
       this.room = built.group;
+      this.room.position.y = this.wallEditY();
+      if (next.exteriorOnly) applyExteriorWallMaterial(built.walls, getExterior(buildingDoc));
       built.doorPivot.rotation.y = previousDoorAngle ?? (getEntrance(shop).open ? -Math.PI / 2 : 0);
       this.scene.add(this.room);
       this.roomKey = nextRoomKey;
@@ -305,7 +316,7 @@ export class ShopScene {
     }
     this.doorTarget = getEntrance(shop).open ? -Math.PI / 2 : 0;
     if (this.builtRoom) this.builtRoom.entrance.visible = this.builtRoom.hasFloor && (next.activeLevel ?? 0) === 0;
-    if ((next.activeLevel ?? 0) === 0 && !next.exteriorOnly) {
+    if ((next.activeLevel ?? 0) === 0) {
       this.renderer.domElement.dataset.doorAngle = String(this.builtRoom?.doorPivot.rotation.y ?? 0);
       this.renderer.domElement.dataset.doorRotation = String(getEntranceRotation(shop));
     } else {
@@ -314,31 +325,37 @@ export class ShopScene {
     }
     const cityShop = buildingDoc;
     const nextCityKey = JSON.stringify([cityShop.width, cityShop.depth, cityShop.floorCells]);
-    if (this.cityKey !== nextCityKey) {
+    const cityChanged = this.cityKey !== nextCityKey;
+    if (cityChanged) {
       lightingContentChanged = true;
       if (this.city) disposeGroup(this.city);
       this.city = buildCity(cityShop);
       this.scene.add(this.city);
       this.cityKey = nextCityKey;
     }
-    if (this.city) { this.city.visible = next.showCity ?? true; this.city.position.y = -floorY; }
-    const nextItemKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, getWallHeight(shop), next.showCity, next.showWalls, getEntrance(shop).position, getEntranceWall(shop), getEntranceRotation(shop), shop.items]);
+    if (this.city) {
+      this.city.visible = next.showCity ?? true;
+      this.city.position.y = -floorY;
+      setCityTimeOfDay(this.city, next.nightMode ?? false, cityChanged || this.reducedMotion.matches);
+      this.updatePedestrianMetadata();
+    }
+    const nextItemKey = JSON.stringify([getRoof(buildingDoc).style, getLevelCount(buildingDoc), activeLevel, shop.width, shop.depth, shop.floorCells, getWallHeight(shop), next.showCity, next.showWalls, getEntrance(shop).position, getEntranceWall(shop), getEntranceRotation(shop), shop.items]);
     if (nextItemKey !== this.itemKey) {
       lightingContentChanged = true;
       while (this.items.children.length) disposeGroup(this.items.children[0]);
       shop.items.forEach((item) => {
-        const group = buildItem(item, getWallHeight(shop) + LEVEL_SLAB);
+        const group = buildItem(item, getStairRise(buildingDoc, Math.min(activeLevel, getLevelCount(buildingDoc) - 1)));
         this.positionItem(group, item);
         this.items.add(group);
       });
       this.itemKey = nextItemKey;
       this.renderer.shadowMap.needsUpdate = true;
     }
-    const nextWallItemKey = JSON.stringify([shop.width, shop.depth, getWallItems(shop)]);
+    const nextWallItemKey = JSON.stringify([next.exteriorOnly, activeLevel, shop.width, shop.depth, getWallItems(shop)]);
     if (nextWallItemKey !== this.wallItemKey) {
       lightingContentChanged = true;
       while (this.wallItems.children.length) disposeGroup(this.wallItems.children[0]);
-      getWallItems(shop).forEach((item) => {
+      getWallItems(shop).filter(item => item.kind === 'window' || getWallItemMount(item) === (next.exteriorOnly ? 'exterior' : 'interior')).forEach((item) => {
         const group = buildWallItem(item, shop);
         this.positionWallItem(group, item);
         this.wallItems.add(group);
@@ -357,7 +374,7 @@ export class ShopScene {
       lightingContentChanged = true;
       this.renderer.shadowMap.needsUpdate = true;
     }
-    const nextLandingKey = JSON.stringify([activeLevel, next.rooftopOnly, shop.width, shop.depth, shop.floorCells, stairOpenings]);
+    const nextLandingKey = JSON.stringify([activeLevel, next.rooftopOnly, shop.width, shop.depth, shop.floorCells, stairOpenings, shop.items.filter(item => item.kind === 'stairs')]);
     if (this.landingKey !== nextLandingKey) {
       if (this.landings) disposeGroup(this.landings);
       this.landings = next.rooftopOnly ? new THREE.Group() : buildStairLandings(buildingDoc, next.activeLevel ?? 0);
@@ -379,17 +396,18 @@ export class ShopScene {
     if (this.lowerFloors) this.lowerFloors.visible = !next.exteriorOnly && activeLevel > 0;
     if (this.building) this.building.visible = !!next.exteriorOnly;
     if (this.landings) this.landings.visible = !next.exteriorOnly;
-    if (this.room) this.room.visible = !next.exteriorOnly && !next.rooftopOnly;
+    if (this.room) { this.room.visible = !next.rooftopOnly; this.room.position.y = this.wallEditY(); }
     this.items.visible = !next.exteriorOnly;
     this.itemPlatforms.visible = !next.exteriorOnly;
-    this.wallItems.visible = next.showWalls && !next.exteriorOnly && !next.rooftopOnly;
-    if (firstShop || exteriorChanged || levelChanged || previousFloorY !== floorY || (next.exteriorOnly && previousBuildingBounds !== JSON.stringify(this.buildingMetrics()))) {
+    this.wallItems.visible = next.showWalls && !next.rooftopOnly;
+    this.syncExteriorEditor();
+    if (firstShop || exteriorChanged || (levelChanged && !next.exteriorOnly) || previousFloorY !== floorY || (next.exteriorOnly && previousBuildingBounds !== JSON.stringify(this.buildingMetrics()))) {
       this.resize();
       this.setView(this.view);
       this.renderer.shadowMap.needsUpdate = true;
     }
     this.updateBoundaryVisibility();
-    if (this.grid) this.grid.visible = next.showGrid && !next.preview;
+    if (this.grid) this.grid.visible = next.showGrid && !next.preview && !next.exteriorOnly;
     if (next.preview && this.hover) this.setHover(null);
     this.updateSelection();
     this.updatePlacement();
@@ -400,11 +418,53 @@ export class ShopScene {
     this.updatePartitionSelection();
     this.updateObjectResize();
     this.updatePreviewMetadata();
+    this.clocks = [];
+    this.scene.traverse(object => { if (object.userData.gameClock) this.clocks.push(object); });
+    this.setGameTime(this.gameMinutes);
     if (lightingContentChanged) this.lighting.refreshSources([this.items, this.wallItems, this.city, this.building]);
     this.lighting.update(0, true);
     this.updateLightingMetadata();
     this.projectionDirty = true;
     this.renderer.domElement.style.cursor = next.preview ? 'grab' : next.placement || next.wallPlacement ? 'crosshair' : 'grab';
+  }
+
+  setGameTime(minutes: number) {
+    this.gameMinutes = minutes;
+    this.clocks.forEach(clock => setWallClockTime(clock, minutes));
+    this.renderer.domElement.dataset.gameMinutes = String(minutes);
+    this.renderer.domElement.dataset.clockHands = JSON.stringify(this.clocks.map(clock => ({
+      id: clock.userData.wallItemId,
+      hour: clock.getObjectByName('game-clock-hour')?.rotation.z,
+      minute: clock.getObjectByName('game-clock-minute')?.rotation.z,
+    })));
+    if (this.clocks.length) this.renderDirty = true;
+  }
+
+  private wallEditY() {
+    return this.state?.exteriorOnly ? getLevelBaseY(this.state.building ?? this.state.shop, this.state.activeLevel ?? 0) : 0;
+  }
+
+  private wallEditRay() {
+    const ray = this.raycaster.ray.clone();
+    ray.origin.y -= this.wallEditY();
+    return ray;
+  }
+
+  private syncExteriorEditor() {
+    if (!this.state?.exteriorOnly || !this.building) return;
+    this.building.children.forEach(floor => {
+      if (typeof floor.userData.level !== 'number') return;
+      const editing = floor.userData.level === (this.state!.activeLevel ?? 0);
+      floor.children.forEach(child => {
+        if (child.name === 'exterior-room' || child.userData.wallItemId) child.visible = !editing;
+      });
+    });
+  }
+
+  private isObjectVisible(object: THREE.Object3D) {
+    let current: THREE.Object3D | null = object;
+    while (current) { if (!current.visible) return false; current = current.parent; }
+    return true;
   }
 
   private updateBoundaryVisibility() {
@@ -414,8 +474,8 @@ export class ShopScene {
     const visible = [
       [walls, this.state.showWalls],
       [backWall, !painting], [leftWall, !painting],
-      [frontWall, !painting && !!this.state.showAllWalls],
-      [rightWall, !painting && !!this.state.showAllWalls],
+      [frontWall, !painting && (!!this.state.showAllWalls || !!this.state.exteriorOnly)],
+      [rightWall, !painting && (!!this.state.showAllWalls || !!this.state.exteriorOnly)],
     ] as const;
     for (const [object, show] of visible) {
       if (object.visible === show) continue;
@@ -479,7 +539,7 @@ export class ShopScene {
   private positionWallItem(group: THREE.Object3D, item: WallItem, shop = this.state!.shop) {
     applyWallItemSize(group, item);
     const point = wallItemPosition(shop, item);
-    group.position.set(point.x, point.y, point.z);
+    group.position.set(point.x, point.y + this.wallEditY(), point.z);
     group.rotation.y = point.rotation;
   }
 
@@ -495,7 +555,7 @@ export class ShopScene {
   private updateWallSelection() {
     if (!this.state) return;
     const item = !this.state.preview && this.state.showWalls && !this.state.placement && !this.state.wallPlacement && !this.gesture ? getWallItems(this.state.shop).find((entry) => entry.id === this.state?.selectedWallId) : undefined;
-    const key = item ? JSON.stringify([item, this.state.shop.width, this.state.shop.depth]) : '';
+    const key = item ? JSON.stringify([item, this.state.shop.width, this.state.shop.depth, this.wallEditY(), this.state.exteriorOnly]) : '';
     if (key === this.wallSelectionKey) return;
     this.wallSelectionKey = key;
     if (this.wallSelection) disposeGroup(this.wallSelection);
@@ -525,7 +585,7 @@ export class ShopScene {
     }
     const ignore = getWallItems(this.state.shop).some((item) => item.id === candidate.id) ? candidate.id : undefined;
     const valid = this.validWallCandidate(this.state.shop, candidate, ignore);
-    const key = JSON.stringify([candidate.kind, candidate.color, candidate.text, candidate.lit, candidate.width, candidate.sizeHeight, candidate.windowStyle]);
+    const key = JSON.stringify([candidate.kind, candidate.color, candidate.text, candidate.lit, candidate.width, candidate.sizeHeight, candidate.windowStyle, candidate.mount, candidate.wallLampStyle, candidate.wallSignStyle]);
     if (key !== this.wallGhostKey || !this.wallGhost) {
       if (this.wallGhost) disposeGroup(this.wallGhost);
       this.wallGhost = buildWallItem(candidate, this.state.shop);
@@ -534,7 +594,7 @@ export class ShopScene {
         if (object instanceof THREE.Mesh) {
           object.castShadow = false;
           const materials = Array.isArray(object.material) ? object.material : [object.material];
-          materials.forEach((material) => { material.transparent = true; material.opacity = 0.52; material.depthWrite = false; });
+          materials.forEach((material) => { material.transparent = true; material.opacity = 0.52; material.depthWrite = false; if (this.state?.exteriorOnly) material.depthTest = false; });
         }
         if (object instanceof THREE.Light) object.visible = false;
       });
@@ -582,6 +642,8 @@ export class ShopScene {
     const items = this.windowPreviewPending;
     this.windowPreviewPending = null;
     this.builtRoom.previewWallItems(items);
+    if (this.state?.exteriorOnly) applyExteriorWallMaterial(this.builtRoom.walls, getExterior(this.state.building ?? this.state.shop));
+    this.updateBoundaryVisibility();
     this.windowPreviewKey = this.windowKey(items);
     this.windowPreviewLast = performance.now();
     this.renderer.domElement.dataset.windowOpenings = this.windowPreviewKey;
@@ -594,10 +656,10 @@ export class ShopScene {
     if (!this.state?.showWalls) return null;
     this.prepareRay(event);
     if (!fallback && this.state.wallPlacement && this.state.wallPlacementMount) {
-      const hit = intersectWallPlane(this.raycaster.ray, this.state.shop, this.state.wallPlacementMount);
+      const hit = intersectWallPlane(this.wallEditRay(), this.state.shop, this.state.wallPlacementMount);
       return hit ? { ...source, wall: hit.wall, line: hit.line, offset: hit.offset, height: hit.height } : null;
     }
-    const hit = intersectWall(this.raycaster.ray, this.state.shop, fallback ? source : undefined);
+    const hit = intersectWall(this.wallEditRay(), this.state.shop, fallback ? source : undefined, this.state.exteriorOnly);
     return hit ? { ...source, wall: hit.wall, line: hit.line, offset: hit.offset, height: hit.height } : null;
   }
 
@@ -662,10 +724,10 @@ export class ShopScene {
     const candidate = placement;
     const existingId = this.state.shop.items.some((item) => item.id === candidate.id) ? candidate.id : undefined;
     const valid = this.canPlaceItem(this.state.shop, candidate, existingId);
-    const key = JSON.stringify([candidate.kind, candidate.color, candidate.stock, candidate.width, candidate.depth, getWallHeight(this.state.shop)]);
+    const key = JSON.stringify([candidate.kind, candidate.color, candidate.stock, candidate.width, candidate.depth, getWallHeight(this.state.shop), getRoof(this.state.building ?? this.state.shop).style]);
     if (key !== this.ghostKey || !this.ghost) {
       if (this.ghost) disposeGroup(this.ghost);
-      this.ghost = buildItem(candidate, getWallHeight(this.state.shop) + LEVEL_SLAB);
+      this.ghost = buildItem(candidate, getStairRise(this.state.building ?? this.state.shop, Math.min(this.state.activeLevel ?? 0, getLevelCount(this.state.building ?? this.state.shop) - 1)));
       this.ghost.traverse((object) => {
         if (object instanceof THREE.Mesh) {
           object.castShadow = false;
@@ -734,6 +796,7 @@ export class ShopScene {
   private updateObjectResize() {
     const selected = this.resizeSelection();
     this.objectResize.group.visible = !!selected;
+    this.objectResize.group.position.y = this.wallEditY();
     if (!selected || !this.state) return;
     const drag = this.gesture?.kind === 'object-resize' ? this.gesture : null;
     const item = drag?.candidate ?? this.resizeHover?.item ?? selected.item;
@@ -753,7 +816,7 @@ export class ShopScene {
     let distance = event.pointerType === 'touch' ? 25 : 19;
     for (const entry of this.objectResize.handles) {
       if (!entry.object.visible) continue;
-      const point = this.project(entry.object.position);
+      const point = this.project(entry.object.getWorldPosition(new THREE.Vector3()));
       const nextDistance = Math.hypot(event.clientX - point.clientX, event.clientY - point.clientY);
       if (nextDistance < distance) { edge = entry.edge; distance = nextDistance; }
     }
@@ -763,7 +826,7 @@ export class ShopScene {
   private resizeWallPoint(event: PointerEvent, item: WallItem) {
     if (!this.state) return null;
     this.prepareRay(event);
-    const point = intersectWallPlane(this.raycaster.ray, this.state.shop, item);
+    const point = intersectWallPlane(this.wallEditRay(), this.state.shop, item);
     return point ? { along: point.offset, height: point.height } : null;
   }
 
@@ -911,7 +974,7 @@ export class ShopScene {
     let distance = event.pointerType === 'touch' ? 29 : 24;
     for (const entry of this.handles.entries) {
       if (!entry.object.visible) continue;
-      const point = this.project(entry.object.position);
+      const point = this.project(entry.object.getWorldPosition(new THREE.Vector3()));
       const candidateDistance = Math.hypot(event.clientX - point.clientX, event.clientY - point.clientY);
       if (candidateDistance < distance) { nearest = entry.id; distance = candidateDistance; }
     }
@@ -920,15 +983,16 @@ export class ShopScene {
 
   private roomTarget(event: PointerEvent): WallSide | 'door' | null {
     if (!this.room || !this.state || getFloorCells(this.gesture?.draft ?? this.state.shop).length === 0) return null;
+    if (this.state.exteriorOnly && (this.state.activeLevel ?? 0) !== 0) return null;
     this.prepareRay(event);
-    const hits = this.raycaster.intersectObjects([...this.room.children, ...this.items.children], true);
+    const hits = this.raycaster.intersectObjects([...this.room.children, ...this.items.children, ...(this.state.exteriorOnly ? [this.wallItems, ...(this.building ? [this.building] : [])] : [])], true);
     for (const hit of hits) {
       let ancestor: THREE.Object3D | null = hit.object;
       let visible = true;
       while (ancestor) { if (!ancestor.visible) { visible = false; break; } ancestor = ancestor.parent; }
       if (!visible) continue;
       if (hit.object.userData.door && this.state?.showWalls) return 'door';
-      if (hit.object.userData.wall && this.state?.showWalls) return hit.object.userData.wall as WallSide;
+      if (hit.object.userData.wall && this.state?.showWalls && !this.state.exteriorOnly) return hit.object.userData.wall as WallSide;
       // Furniture and the floor occlude targets behind them, like the visible scene.
       if (hit.object instanceof THREE.Mesh) return null;
     }
@@ -1007,6 +1071,7 @@ export class ShopScene {
     }
     this.transient = dimensions;
     this.builtRoom.previewDimensions(dimensions.width, dimensions.depth, dimensions.wallHeight, dimensions.entrancePosition);
+    if (this.state.exteriorOnly) applyExteriorWallMaterial(this.builtRoom.walls, getExterior(this.state.building ?? this.state.shop));
     this.state.shop.items.forEach((item) => {
       const object = this.items.children.find((candidate) => candidate.userData.itemId === item.id);
       if (!object) return;
@@ -1141,6 +1206,7 @@ export class ShopScene {
     const base = this.dimensions();
     this.builtRoom?.previewDimensions(base.width, base.depth, base.wallHeight, base.entrancePosition);
     if (this.builtRoom) {
+      if (this.state.exteriorOnly) applyExteriorWallMaterial(this.builtRoom.walls, getExterior(this.state.building ?? this.state.shop));
       this.builtRoom.floor.visible = true;
       this.updateBoundaryVisibility();
       this.builtRoom.entrance.visible = this.builtRoom.hasFloor && (this.state.activeLevel ?? 0) === 0;
@@ -1239,7 +1305,7 @@ export class ShopScene {
     data.previewWidth = String(dimensions.width);
     data.previewDepth = String(dimensions.depth);
     data.previewWallHeight = String(dimensions.wallHeight);
-    if ((this.state.activeLevel ?? 0) === 0 && !this.state.exteriorOnly) data.previewEntrancePosition = String(dimensions.entrancePosition);
+    if ((this.state.activeLevel ?? 0) === 0) data.previewEntrancePosition = String(dimensions.entrancePosition);
     else delete data.previewEntrancePosition;
   }
 
@@ -1277,6 +1343,7 @@ export class ShopScene {
   }
 
   private pickAt(event: PointerEvent): string | null {
+    if (this.state?.exteriorOnly) return null;
     this.prepareRay(event);
     const intersections = this.raycaster.intersectObjects(this.items.children, true);
     for (const intersection of intersections) {
@@ -1311,7 +1378,7 @@ export class ShopScene {
   private pickWallAt(event: PointerEvent): string | null {
     if (!this.state?.showWalls) return null;
     this.prepareRay(event);
-    const intersections = this.raycaster.intersectObjects([...this.wallItems.children, ...this.items.children, ...(this.room?.children ?? [])], true);
+    const intersections = this.raycaster.intersectObjects([...this.wallItems.children, ...this.items.children, ...(this.room?.children ?? []), ...(this.state.exteriorOnly && this.building ? [this.building] : [])], true);
     for (const intersection of intersections) {
       let object: THREE.Object3D | null = intersection.object;
       let visible = true;
@@ -1337,14 +1404,14 @@ export class ShopScene {
     if (!this.state) return;
     const shop = this.state.shop, height = getWallHeight(shop);
     const runs = mount ? getWallRuns(shop).filter(run => run.wall === mount.wall && run.line === mount.line) : [];
-    const key = JSON.stringify([runs, shop.width, shop.depth, height]);
+    const key = JSON.stringify([runs, shop.width, shop.depth, height, this.wallEditY(), this.state.exteriorOnly]);
     if (key === this.wallMountGuideKey) return;
     this.wallMountGuideKey = key;
     if (this.wallMountGuide) disposeGroup(this.wallMountGuide);
     this.wallMountGuide = null;
     this.renderer.domElement.dataset.wallMountGuide = JSON.stringify(mount ?? null);
     if (!runs.length) return;
-    const group = new THREE.Group(); group.name = 'wall-mount-guide';
+    const group = new THREE.Group(); group.name = 'wall-mount-guide'; group.position.y = this.wallEditY();
     for (const run of runs) {
       const position = wallItemPosition(shop, { ...this.state.wallPlacement!, wall: run.wall, line: run.line, offset: (run.start + run.end) / 2, height: height / 2 });
       const panel = new THREE.Group(); panel.position.set(position.x, position.y, position.z); panel.rotation.y = position.rotation;
@@ -1358,6 +1425,7 @@ export class ShopScene {
   }
 
   private pickPartitionAt(event: PointerEvent): string | null {
+    if (this.state?.exteriorOnly) return null;
     if (!this.state?.showWalls || !this.builtRoom) return null;
     this.prepareRay(event);
     const hits = this.raycaster.intersectObjects([this.builtRoom.partitions, this.items, this.wallItems, this.room!], true);
@@ -1435,7 +1503,7 @@ export class ShopScene {
       if (edge) this.beginObjectResize(event, edge);
       return;
     }
-    const doorEditable = this.state.editMode !== 'build' || this.state.buildTool === 'walls';
+    const doorEditable = (this.state.activeLevel ?? 0) === 0 && (this.state.editMode !== 'build' || this.state.buildTool === 'walls');
     if (doorEditable && (this.pickHandle(event) === 'door' || this.roomTarget(event) === 'door')) {
       this.beginGesture(event, 'door', 'door');
       return;
@@ -1488,6 +1556,7 @@ export class ShopScene {
       this.renderer.domElement.style.cursor = 'crosshair';
       return;
     }
+    if (this.state.exteriorOnly) { this.setHover(null); this.renderer.domElement.style.cursor = this.pickHandle(event) === 'door' || this.roomTarget(event) === 'door' || this.pickWallAt(event) ? 'move' : 'grab'; return; }
     const painting = this.state.editMode === 'build' && ['add', 'erase', 'partition'].includes(this.state.buildTool ?? 'add') && !this.state.placement;
     const cell = this.cellAt(event, painting);
     this.setHover(cell);
@@ -1581,8 +1650,17 @@ export class ShopScene {
   private cameraChanged = () => { this.projectionDirty = true; this.renderDirty = true; };
   private motionChanged = () => {
     this.lighting.setMode(this.state?.nightMode ?? false, this.reducedMotion.matches);
+    if (this.city) setCityTimeOfDay(this.city, this.state?.nightMode ?? false, this.reducedMotion.matches);
+    this.updatePedestrianMetadata();
     this.renderDirty = true;
   };
+
+  private updatePedestrianMetadata() {
+    const crowd = this.city && getCityPedestrianState(this.city);
+    if (!crowd) return;
+    this.renderer.domElement.dataset.pedestrianPhase = crowd.phase;
+    this.renderer.domElement.dataset.visiblePedestrians = String(this.city?.visible ? crowd.visible : 0);
+  }
 
   private updateLightingMetadata() {
     const data = this.renderer.domElement.dataset;
@@ -1601,6 +1679,7 @@ export class ShopScene {
     this.width = Math.max(1, rect.width);
     this.height = Math.max(1, rect.height);
     this.renderer.setSize(this.width, this.height, false);
+    this.backdrop.resize(this.width, this.height);
     const aspect = this.width / this.height;
     const exterior = this.state?.exteriorOnly;
     const doc = exterior ? this.state!.building ?? this.state!.shop : this.state?.shop;
@@ -1634,6 +1713,7 @@ export class ShopScene {
   }
 
   setView(view: CameraView) {
+    this.backdrop.setView(view);
     this.cancelGesture();
     this.view = view;
     this.resize();
@@ -1685,6 +1765,7 @@ export class ShopScene {
       }
       helpers.forEach((object) => { if (object) object.visible = false; });
       return this.lighting.capture(() => {
+        this.backdrop.setNightProgress(this.lighting.nightProgress);
         this.renderer.render(this.scene, this.camera);
         return this.renderer.domElement.toDataURL('image/png');
       });
@@ -1695,6 +1776,7 @@ export class ShopScene {
       this.wallItems.children.forEach((object, index) => { object.visible = wallVisibility[index]; });
       if (candidate) this.previewWindow(candidate.kind === 'window' ? candidate : null, true);
       this.lighting.update(0, true);
+      this.backdrop.setNightProgress(this.lighting.nightProgress);
       this.updateLightingMetadata();
       this.renderDirty = true;
       this.renderer.render(this.scene, this.camera);
@@ -1713,6 +1795,12 @@ export class ShopScene {
     data.levelCount = String(getLevelCount(this.state.building ?? this.state.shop));
     data.exteriorOnly = String(!!this.state.exteriorOnly);
     data.rooftopOnly = String(!!this.state.rooftopOnly);
+    data.rooftopStairAccess = getRoof(this.state.building ?? this.state.shop).stairAccess ?? 'open';
+    let enclosures = 0, guardrails = 0;
+    (this.state.exteriorOnly ? this.building : this.rooftop)?.traverse(object => { if (object.name.startsWith('stair-access-enclosure:') && this.isObjectVisible(object)) enclosures++; });
+    this.landings?.traverse(object => { if (object.name === 'stairwell-guardrail' && this.isObjectVisible(object)) guardrails++; });
+    data.rooftopEnclosures = String(enclosures);
+    data.landingGuardrails = String(guardrails);
     data.showAllWalls = String(!!this.state.showAllWalls);
     const boundaryVisible = (wall?: THREE.Group) => {
       if (!wall?.children.length) return false;
@@ -1762,17 +1850,17 @@ export class ShopScene {
       quaternion: object.getWorldQuaternion(new THREE.Quaternion()).toArray(),
       scale: object.getWorldScale(new THREE.Vector3()).toArray(),
     });
-    const entrance = this.state.exteriorOnly ? this.building?.getObjectByName('shop-entrance') : this.builtRoom?.entrance;
+    const entrance = this.state.exteriorOnly && (this.state.activeLevel ?? 0) > 0 ? this.building?.getObjectByName('shop-entrance') : this.builtRoom?.entrance;
     data.renderedEntrance = JSON.stringify(entrance?.visible && (this.state.exteriorOnly || (this.state.activeLevel ?? 0) === 0)
       ? { ...pose(entrance), canopy: !!entrance.getObjectByName('entrance-canopy'), door: pose(entrance.getObjectByName('entrance-door-glass')!) } : null);
     const windows: object[] = [];
-    (this.state.exteriorOnly ? this.building : this.wallItems)?.traverse(object => {
-      if (object.name.startsWith('window-style:')) {
+    [...(this.state.exteriorOnly && this.building ? [this.building] : []), this.wallItems].forEach(root => root.traverse(object => {
+      if (object.name.startsWith('window-style:') && this.isObjectVisible(object)) {
         windows.push({ id: object.userData.wallItemId, style: object.name.slice('window-style:'.length), ...pose(object) });
       }
-    });
+    }));
     data.renderedWindows = JSON.stringify(windows);
-    if (this.state.exteriorOnly) {
+    if (this.state.exteriorOnly && this.state.preview) {
       for (const key of ['resizeHandles', 'resizeTiles', 'cellCenters', 'floorCells', 'floorOutline', 'paintCells', 'groundTargets', 'placementTargets', 'handles', 'itemCenters', 'wallItemCenters', 'wallTargets']) data[key] = '[]';
       data.doorSelected = 'false'; data.resizeMode = 'false'; delete data.doorCenter;
       this.projectionDirty = false;
@@ -1780,8 +1868,11 @@ export class ShopScene {
     }
     data.doorSelected = String(floorCells.length > 0 && this.state.selectedDoor && (this.state.activeLevel ?? 0) === 0);
     data.resizeMode = String(!!this.resizeSelection());
-    data.resizeHandles = JSON.stringify(this.objectResize.group.visible ? this.objectResize.handles.filter(entry => entry.object.visible).map(({ edge, object }) => ({ edge, ...this.project(object.position), worldX: object.position.x, worldY: object.position.y, worldZ: object.position.z })) : []);
-    data.resizeTiles = JSON.stringify(this.objectResize.group.visible ? this.objectResize.targets.map(({ point, ...target }) => ({ ...target, ...this.project(point) })) : []);
+    data.resizeHandles = JSON.stringify(this.objectResize.group.visible ? this.objectResize.handles.filter(entry => entry.object.visible).map(({ edge, object }) => {
+      const point = object.getWorldPosition(new THREE.Vector3());
+      return { edge, ...this.project(point), worldX: point.x, worldY: point.y, worldZ: point.z };
+    }) : []);
+    data.resizeTiles = JSON.stringify(this.objectResize.group.visible ? this.objectResize.targets.map(({ point, ...target }) => ({ ...target, ...this.project(this.objectResize.group.localToWorld(point.clone())) })) : []);
     data.cellCenters = JSON.stringify(cells);
     data.floorCells = JSON.stringify(floorCells);
     data.floorOutline = JSON.stringify(floorOutline(floorCells));
@@ -1810,7 +1901,7 @@ export class ShopScene {
     if (this.state.showWalls) getWallRuns(this.state.shop).forEach((run) => {
       for (let offset = run.start + 0.5; offset < run.end; offset += 0.5) {
         for (let height = 0.5; height < getWallHeight(this.state!.shop); height += 0.5) {
-          const point = wallIsHorizontal(run.wall) ? new THREE.Vector3(offset - this.state!.shop.width / 2, height, run.line - this.state!.shop.depth / 2) : new THREE.Vector3(run.line - this.state!.shop.width / 2, height, offset - this.state!.shop.depth / 2);
+          const point = wallIsHorizontal(run.wall) ? new THREE.Vector3(offset - this.state!.shop.width / 2, height + this.wallEditY(), run.line - this.state!.shop.depth / 2) : new THREE.Vector3(run.line - this.state!.shop.width / 2, height + this.wallEditY(), offset - this.state!.shop.depth / 2);
           wallTargets.push({ ...run, offset, height, ...this.project(point) });
         }
       }
@@ -1826,20 +1917,28 @@ export class ShopScene {
   private animate = () => {
     if (this.disposed) return;
     const time = performance.now();
-    const delta = Math.min((time - (this.lastFrameTime || time)) / 1000, 0.1);
+    const elapsed = Math.max(0, (time - (this.lastFrameTime || time)) / 1000);
+    const delta = Math.min(elapsed, 0.1);
     this.lastFrameTime = time;
     this.controls.update();
     this.flushWindowPreview();
+    if (this.city && updateCityPedestrians(this.city, elapsed)) {
+      this.renderDirty = true;
+      this.updatePedestrianMetadata();
+    }
     const pivot = this.builtRoom?.doorPivot;
     if (pivot && pivot.rotation.y !== this.doorTarget) {
       pivot.rotation.y = Math.abs(pivot.rotation.y - this.doorTarget) < 0.002 ? this.doorTarget : THREE.MathUtils.damp(pivot.rotation.y, this.doorTarget, 12, delta);
-      if ((this.state?.activeLevel ?? 0) === 0 && !this.state?.exteriorOnly) this.renderer.domElement.dataset.doorAngle = String(pivot.rotation.y);
+      if ((this.state?.activeLevel ?? 0) === 0) this.renderer.domElement.dataset.doorAngle = String(pivot.rotation.y);
       this.renderDirty = true;
       this.projectionDirty = true;
       this.refreshDragShadows();
     }
     if (this.projectionDirty) { this.updateHandles(); this.updateObjectResize(); this.updateItemPlatforms(); this.updateCellMetadata(); }
-    if (this.lighting.update(delta, this.renderDirty)) this.renderDirty = true;
+    // Time-of-day transitions follow elapsed time even on low-frame-rate devices.
+    // Only interactive damping above needs a capped delta.
+    if (this.lighting.update(elapsed, this.renderDirty)) this.renderDirty = true;
+    this.backdrop.setNightProgress(this.lighting.nightProgress);
     this.updateLightingMetadata();
     if (this.renderDirty) {
       this.renderer.render(this.scene, this.camera);
@@ -1870,6 +1969,7 @@ export class ShopScene {
     window.removeEventListener('blur', this.windowBlur);
     this.reducedMotion.removeEventListener('change', this.motionChanged);
     this.lighting.dispose();
+    this.backdrop.dispose();
     this.scene.traverse((object) => {
       if (object instanceof THREE.DirectionalLight || object instanceof THREE.PointLight || object instanceof THREE.SpotLight) object.dispose();
     });

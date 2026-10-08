@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { CATALOG, getEntrance, getEntranceAnchor, getEntranceRotation, getEntranceWall, getExterior, getFloorCells, getItemSize, getWallHeight, getWallItems, getWallItemSize, getWallRuns, wallItemPosition, WALL_CATALOG } from '../model';
+import { CATALOG, getEntrance, getEntranceAnchor, getEntranceRotation, getEntranceWall, getExterior, getFloorCells, getItemSize, getWallHeight, getWallItems, getWallItemSize, getWallLampStyle, getWallSignStyle, getWallRuns, wallItemPosition, WALL_CATALOG } from '../model';
 import type { ProductKind, ShopDocument, ShopItem, WallItem, WallSide } from '../model';
 import { wallPanels } from './wallGeometry';
 import { buildWindowGeometry, buildWindowSpandrels } from './windowGeometry';
@@ -10,6 +10,8 @@ import { buildBuildingFurniture } from './buildingFurniture';
 import { subtractFloorOpenings, type FloorOpening } from './stairGeometry';
 import { buildUtilityItem } from './utilityObjects';
 import { buildInteriorPartitions } from './partitionGeometry';
+import { buildWallClock } from './wallClock';
+import { buildWallSignVariant } from './wallSigns';
 export { buildCity } from './city';
 
 const CREAM = '#f5ead6';
@@ -389,14 +391,41 @@ export function buildWallItem(item: WallItem, _shop?: ShopDocument): THREE.Group
   const { width: w, height: h } = size;
   if (item.kind === 'window') {
     group.add(buildWindowGeometry(item));
+  } else if (item.kind === 'wall-clock') {
+    group.add(buildWallClock(w, h, color));
   } else if (item.kind === 'wall-lamp') {
-    box(group, 0.15, 0.42, 0.055, color, 0, -0.025, 0.035, 0.045);
-    rod(group, new THREE.Vector3(0, -0.17, 0.05), new THREE.Vector3(0, -0.17, 0.23), 0.025, '#aa885d');
-    rod(group, new THREE.Vector3(0, -0.17, 0.23), new THREE.Vector3(0, 0.12, 0.23), 0.025, '#aa885d');
-    const shade = cylinder(group, 0.12, 0.225, 0.27, color, 0, 0.175, 0.23, 24);
-    shade.material.dispose();
-    shade.material = material(color, { emissive: '#ffcc7d', emissiveIntensity: item.lit ? 0.5 : 0, side: THREE.DoubleSide });
-    const bulb = mesh(group, new THREE.SphereGeometry(0.072, 12, 8), '#ffe6a4', 0, 0.028, 0.23,
+    const style = getWallLampStyle(item);
+    group.userData.wallLampStyle = style;
+    let shade: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+    if (style === 'lantern') {
+      box(group, 0.12, 0.44, 0.045, color, 0, 0.015, 0.025, 0.018);
+      rod(group, new THREE.Vector3(0, 0.25, 0.035), new THREE.Vector3(0, 0.25, 0.22), 0.022, color);
+      const cap = mesh(group, new THREE.ConeGeometry(0.24, 0.15, 4).rotateY(Math.PI / 4), color, 0, 0.195, 0.18);
+      cap.name = 'lantern-roof';
+      shade = box(group, 0.255, 0.34, 0.2, '#f8dfad', 0, -0.05, 0.18, 0.015);
+      shade.name = 'lantern-glass';
+      shade.material.transparent = true; shade.material.opacity = 0.7; shade.material.depthWrite = false;
+      for (const x of [-0.145, 0.145]) for (const z of [0.065, 0.295]) box(group, 0.024, 0.39, 0.024, color, x, -0.05, z, 0.004);
+      box(group, 0.34, 0.055, 0.28, color, 0, -0.265, 0.18, 0.012);
+      cylinder(group, 0.04, 0.04, 0.07, color, 0, 0.30, 0.18, 10);
+    } else if (style === 'bulkhead') {
+      const rim = mesh(group, new THREE.SphereGeometry(0.2, 24, 16), color, 0, 0, 0.055);
+      rim.scale.set(1.1, 1.55, 0.34); rim.name = 'bulkhead-rim';
+      shade = mesh(group, new THREE.SphereGeometry(0.18, 24, 16), '#fff0cb', 0, 0, 0.093);
+      shade.scale.set(1, 1.52, 0.49); shade.name = 'bulkhead-glass';
+      shade.material.transparent = true; shade.material.opacity = 0.82;
+      for (const y of [-0.13, 0.13]) box(group, 0.34, 0.026, 0.028, color, 0, y, 0.17, 0.009);
+      box(group, 0.025, 0.47, 0.025, color, 0, 0, 0.185, 0.008);
+      for (const y of [-0.275, 0.275]) box(group, 0.08, 0.055, 0.08, color, 0, y, 0.055, 0.013);
+    } else {
+      box(group, 0.15, 0.42, 0.055, color, 0, -0.025, 0.035, 0.045);
+      rod(group, new THREE.Vector3(0, -0.17, 0.05), new THREE.Vector3(0, -0.17, 0.23), 0.025, '#aa885d');
+      rod(group, new THREE.Vector3(0, -0.17, 0.23), new THREE.Vector3(0, 0.12, 0.23), 0.025, '#aa885d');
+      shade = cylinder(group, 0.12, 0.225, 0.27, color, 0, 0.175, 0.23, 24);
+    }
+    shade.material.emissive.set('#ffcc7d'); shade.material.emissiveIntensity = item.lit ? 0.5 : 0;
+    shade.material.side = THREE.DoubleSide;
+    const bulb = mesh(group, new THREE.SphereGeometry(style === 'bulkhead' ? 0.045 : 0.072, 12, 8), '#ffe6a4', 0, style === 'sconce' ? 0.028 : -0.02, style === 'bulkhead' ? 0.12 : style === 'lantern' ? 0.18 : 0.23,
       { emissive: '#ffda8c', emissiveIntensity: item.lit ? 1.4 : 0, roughness: 0.5 });
     bulb.castShadow = false;
     if (item.lit) {
@@ -451,6 +480,8 @@ export function buildWallItem(item: WallItem, _shop?: ShopDocument): THREE.Group
     const hill = new THREE.Shape(); hill.moveTo(-0.325, -0.25); hill.quadraticCurveTo(0.03, -0.07, 0.325, -0.3); hill.lineTo(0.325, -0.415); hill.lineTo(-0.325, -0.415); hill.closePath();
     const foreground = new THREE.Mesh(new THREE.ShapeGeometry(hill), new THREE.MeshBasicMaterial({ color: '#ad8774' }));
     foreground.position.z = 0.107; art.add(foreground);
+  } else if (item.kind === 'wall-sign' && getWallSignStyle(item) !== 'plaque') {
+    group.add(buildWallSignVariant(item, textTexture));
   } else if (item.kind === 'wall-sign') {
     box(group, w, h, 0.09, WOOD, 0, 0, 0.046, 0.025);
     box(group, w - 0.1, h - 0.1, 0.012, color, 0, 0, 0.097, 0.014);

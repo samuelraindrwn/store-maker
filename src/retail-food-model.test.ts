@@ -22,7 +22,7 @@ const allProducts: ProductKind[] = ['books', 'ceramics', 'plants', 'fashion', 'v
 
 describe('retail and food catalog', () => {
   it('adds eleven distinct kinds with the requested dimensions, names, and initial stock', () => {
-    expect(new Set(CATALOG.map(entry => entry.kind)).size).toBe(28)
+    expect(new Set(CATALOG.map(entry => entry.kind)).size).toBe(30)
     for (const [kind, name, width, depth, stockable, stock] of additions) {
       const entry = CATALOG.find(entry => entry.kind === kind)!
       expect(entry).toMatchObject({ kind, name, width, depth, stockable })

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getItemSize, type ShopItem } from '../model';
+import { buildOutdoorFurniture } from './outdoorFurniture';
 
 function box(parent: THREE.Object3D, name: string, w: number, h: number, d: number, color: string, x = 0, y = 0, z = 0) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color, roughness: 0.78 }));
@@ -15,6 +16,8 @@ function ellipsoid(parent: THREE.Object3D, name: string, color: string, x: numbe
 
 /** Local footprints are authored at their catalog size, then sized by the usual item transform. */
 export function buildBuildingFurniture(item: ShopItem, floorRise = 2.99): THREE.Group | null {
+  const cover = buildOutdoorFurniture(item);
+  if (cover) return cover;
   if (!['stairs', 'warehouse-rack', 'bathroom'].includes(item.kind)) return null;
   const group = new THREE.Group();
   group.name = `item:${item.id}`; group.userData.itemId = item.id;

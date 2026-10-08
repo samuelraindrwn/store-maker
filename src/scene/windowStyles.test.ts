@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createEmptyShop, getWallItemSize, wallItemPosition, type ShopDocument, type WallItem, type WindowStyle } from '../model';
 import { applyWallItemSize, buildRoom, buildWallItem, disposeGroup } from './objects';
+import { EXTERIOR_WINDOW_DEPTH } from './windowGeometry';
 
 const styles: WindowStyle[] = ['classic', 'picture', 'grid', 'sliding', 'arched'];
 const windowItem = (windowStyle: WindowStyle, width = 2.2, sizeHeight = 1.4): WallItem => ({
@@ -36,7 +37,7 @@ describe('five procedural window styles', () => {
         expect(bounds.max.x).toBeLessThanOrEqual(width / 2 + 0.001);
         expect(bounds.min.y).toBeGreaterThanOrEqual(-height / 2 - 0.001);
         expect(bounds.max.y).toBeLessThanOrEqual(height / 2 + 0.001);
-        expect(bounds.min.z).toBeGreaterThanOrEqual(-0.05);
+        expect(bounds.min.z).toBeGreaterThanOrEqual(-EXTERIOR_WINDOW_DEPTH - 0.001);
         expect(bounds.max.z).toBeLessThanOrEqual(getWallItemSize(item).depth + 0.001);
         group.traverse(object => { expect(object.userData.wallItemId).toBe(item.id); });
       } finally { disposeGroup(group); }

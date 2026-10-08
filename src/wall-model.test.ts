@@ -15,9 +15,10 @@ const expectValidAttachments = (doc: ShopDocument) => {
 };
 
 describe('wall catalog and geometry coordinates', () => {
-  it('provides five distinct accessories with valid defaults and unique IDs', () => {
+  it('provides six distinct accessories with valid defaults and unique IDs', () => {
     expect(WALL_CATALOG.map(item => [item.kind, item.width, item.height])).toEqual([
       ['window', 2.2, 1.4], ['wall-lamp', 0.45, 0.7], ['wall-shelf', 1.5, 0.85], ['painting', 0.9, 1.1], ['wall-sign', 1.6, 0.55],
+      ['wall-clock', 0.7, 0.7],
     ]);
     const items = WALL_CATALOG.flatMap(entry => [createWallItem(entry.kind), createWallItem(entry.kind)]);
     expect(new Set(items.map(item => item.id)).size).toBe(items.length);
@@ -139,7 +140,7 @@ describe('legacy decorations and safe persistence', () => {
     expect(doc.wallItems).toBeUndefined();
     expect(parseShop(doc)).toEqual(doc);
     expect(createEmptyShop().wallItems).toEqual([]);
-    expect(createInitialShop().wallItems).toHaveLength(4);
+    expect(createInitialShop().wallItems).toHaveLength(5);
   });
 
   it('synthesizes only legacy decorations that fit and persists an intentional removal', () => {

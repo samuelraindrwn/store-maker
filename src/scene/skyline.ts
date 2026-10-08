@@ -13,7 +13,7 @@ export function buildSkyline(shop: ShopDocument): THREE.Group {
   const bounds = getFloorBounds(shop);
   const centerX = (bounds.minX + bounds.maxX + 1) / 2 - shop.width / 2;
   const centerZ = (bounds.minZ + bounds.maxZ + 1) / 2 - shop.depth / 2;
-  const breadth = Math.max(38, bounds.width + 26);
+  const breadth = Math.max(55, bounds.width + 38);
   const base = -0.395;
   const parts: Record<Primitive, Instance[]> = { box: [], cylinder: [], window: [], 'lit-window': [] };
   let windowIndex = 0;
@@ -123,22 +123,22 @@ export function buildSkyline(shop: ShopDocument): THREE.Group {
   const away = new THREE.Vector2(-10.5, -13.35).normalize();
   const across = new THREE.Vector2(-away.y, away.x);
   const rearExtent = Math.abs(away.x) * bounds.width / 2 + Math.abs(away.y) * bounds.depth / 2;
-  const nearDistance = Math.max(16, rearExtent + 11);
+  const nearDistance = Math.max(22, rearExtent + 16);
   const nearHeights = [7.2, 9.8, 8.2, 11.2, 7.7, 10.6, 8.8, 6.7];
   nearHeights.forEach((height, index) => {
     const lateral = (index / (nearHeights.length - 1) - 0.5) * breadth;
     const distance = nearDistance + (index % 3) * 0.13;
     const x = centerX + away.x * distance + across.x * lateral;
     const z = centerZ + away.y * distance + across.y * lateral;
-    tower(x, z, 5.3 + (index % 3) * 0.55, 4.3 + (index % 2) * 0.45, height, index, false, 0.85);
+    tower(x, z, 5.3 + (index % 3) * 0.55, 4.3 + (index % 2) * 0.45, height, index, false, 1.15);
   });
-  const farHeights = [10.4, 8.6, 12.4, 9.5, 11.6, 8.8];
+  const farHeights = [10.4, 8.6, 12.4, 9.5, 11.6, 8.8, 11.0, 9.3];
   farHeights.forEach((height, index) => {
-    const lateral = (index / (farHeights.length - 1) - 0.5) * (breadth + 2) + 0.5;
-    const distance = nearDistance + 5 + (index % 2) * 0.3;
+    const lateral = (index / (farHeights.length - 1) - 0.5) * (breadth + 12) + 0.5;
+    const distance = nearDistance + 7.5 + (index % 2) * 0.3;
     const x = centerX + away.x * distance + across.x * lateral;
     const z = centerZ + away.y * distance + across.y * lateral;
-    tower(x, z, 7.4 + (index % 2) * 0.7, 5.8, height, index + 8, true, 0.55);
+    tower(x, z, 7.4 + (index % 2) * 0.7, 5.8, height, index + 8, true, 0.78);
   });
 
   const geometries: Record<Primitive, THREE.BufferGeometry> = {

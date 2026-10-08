@@ -4,6 +4,8 @@ import { getWallItemSize, getWindowStyle, type WallItem } from '../model';
 
 const INSET = 0.08;
 const WOOD = '#c69972';
+/** From the inward mounting origin, past the structural wall's outer face. */
+export const EXTERIOR_WINDOW_DEPTH = 0.2;
 
 function material(color: string, extra: THREE.MeshStandardMaterialParameters = {}) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.78, ...extra });
@@ -50,11 +52,36 @@ function archShape(width: number, height: number, inset = 0) {
   return shape;
 }
 
-/** Window contents only: centered in X/Y, projecting into the room along +Z. */
+/** Carry the original trim through the wall; keep its one set of glass panes. */
+function extendFrameToExterior(group: THREE.Group, inwardDepth: number) {
+  const forward = new THREE.Box3().setFromObject(group).max.z;
+  // buildWallItem normalizes the inward projection to the catalog depth. Keep
+  // the outer casing at its physical mounting depth after that same transform.
+  const depthScale = Math.min(1, inwardDepth / forward);
+  group.updateMatrixWorld(true);
+  group.traverse(object => {
+    if (!(object instanceof THREE.Mesh) || object.name === 'wall-window-glass' || object.name.endsWith('-handle')) return;
+    const geometry = object.geometry;
+    geometry.computeBoundingBox();
+    const bounds = geometry.boundingBox!, previousMin = bounds.min.z, previousMax = bounds.max.z;
+    if (previousMax <= previousMin) return;
+    const back = -EXTERIOR_WINDOW_DEPTH / depthScale - object.matrixWorld.elements[14];
+    const positions = geometry.getAttribute('position');
+    for (let index = 0; index < positions.count; index++) {
+      const progress = (positions.getZ(index) - previousMin) / (previousMax - previousMin);
+      positions.setZ(index, THREE.MathUtils.lerp(back, previousMax, progress));
+    }
+    positions.needsUpdate = true;
+    geometry.computeVertexNormals(); geometry.computeBoundingBox(); geometry.computeBoundingSphere();
+    object.userData.exteriorWindowTrim = true;
+  });
+}
+
+/** One window spans both wall faces; +Z points into the room. */
 export function buildWindowGeometry(item: WallItem): THREE.Group {
   const group = new THREE.Group();
   const style = getWindowStyle(item);
-  const { width: w, height: h } = getWallItemSize(item);
+  const { width: w, height: h, depth } = getWallItemSize(item);
   const color = item.color;
   group.name = `window-style:${style}`;
   group.userData.windowStyle = style;
@@ -102,6 +129,7 @@ export function buildWindowGeometry(item: WallItem): THREE.Group {
     block(group, 'window-sill', w, style === 'picture' ? 0.045 : 0.065, style === 'picture' ? 0.22 : 0.32,
       style === 'picture' ? color : WOOD, 0, -h / 2 + (style === 'picture' ? 0.0225 : 0.0325), style === 'picture' ? 0.07 : 0.12);
   }
+  extendFrameToExterior(group, depth);
   return group;
 }
 

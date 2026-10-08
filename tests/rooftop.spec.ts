@@ -31,6 +31,11 @@ async function open(page: Page, info: TestInfo, fixture?: ShopDocument) {
 }
 
 async function editRoof(page: Page) {
+  if (!await button(page, 'Edit rooftop').count()) {
+    await button(page, 'Eksterior').click();
+    await button(page, 'Rooftop').click();
+    await ready(page);
+  }
   await button(page, 'Edit rooftop').click();
   await ready(page, true);
   await expect(button(page, 'Edit rooftop')).toHaveAttribute('aria-pressed', 'true');
@@ -166,6 +171,7 @@ test('rooftop has real stair access and outdoor furniture can be placed, dragged
 test('four interior floors keep a separate editable rooftop and roof-style switching preserves furniture', async ({ page }, info) => {
   test.setTimeout(120_000);
   const errors = await open(page, info);
+  await expect(button(page, 'Edit rooftop')).toHaveCount(0);
   await page.getByLabel('Jumlah lantai', { exact: true }).selectOption('4');
   await editRoof(page);
   const design = await saved(page);
@@ -182,9 +188,12 @@ test('four interior floors keep a separate editable rooftop and roof-style switc
   await button(page, 'Eksterior').click();
   await button(page, 'Atap genteng').click();
   await ready(page);
+  await expect(button(page, 'Edit rooftop')).toHaveCount(0);
+  expect(floors(await saved(page)).at(-1)!.items.some(item => item.roofAccess)).toBe(false);
   expect((await saved(page)).rooftop).toEqual(design.rooftop);
   await button(page, 'Rooftop').click();
   await ready(page);
+  await expect(button(page, 'Edit rooftop')).toBeVisible();
   expect((await saved(page)).rooftop).toEqual(design.rooftop);
   await editRoof(page);
   expect(await data(page, 'rooftop-items')).toEqual(renderedRoofItems(design));
@@ -192,6 +201,66 @@ test('four interior floors keep a separate editable rooftop and roof-style switc
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   await expect(button(page, 'Edit rooftop')).toBeVisible();
   await page.locator('.building-navigation').screenshot({ path: info.outputPath('rooftop-navigation-320px.png') });
+  expect(errors).toEqual([]);
+});
+
+test('enclosed roof access and resized outdoor covers restore correctly after switching roof styles', async ({ page }, info) => {
+  test.setTimeout(150_000);
+  const errors = await open(page, info);
+  await expect(button(page, 'Edit rooftop')).toHaveCount(0);
+  await button(page, 'Eksterior').click();
+  await button(page, 'Rooftop').click();
+  await button(page, 'Berdinding & beratap').click();
+  await expect.poll(async () => (await saved(page)).roof?.stairAccess).toBe('enclosed');
+  await editRoof(page);
+  await expect(canvas(page)).toHaveAttribute('data-rooftop-stair-access', 'enclosed');
+  await expect.poll(() => data<number>(page, 'rooftop-enclosures')).toBeGreaterThan(0);
+  const initial = await saved(page);
+  expect(roofItems(initial).some(item => item.kind === 'dining-table' && item.x === 6 && item.z === 5)).toBe(true);
+
+  await page.getByTestId('catalog-canopy').click();
+  await placeAt(page, 5, 4);
+  const canopy = roofItems(await saved(page)).find(item => item.kind === 'canopy')!;
+  expect(canopy).toBeDefined();
+  await button(page, 'Ubah ukuran barang').click();
+  await page.getByLabel('Panjang barang', { exact: true }).fill('4');
+  await page.getByLabel('Panjang barang', { exact: true }).press('Enter');
+  await page.getByLabel('Kedalaman barang', { exact: true }).fill('4');
+  await page.getByLabel('Kedalaman barang', { exact: true }).press('Enter');
+  await expect.poll(async () => roofItems(await saved(page)).find(item => item.id === canopy.id)).toMatchObject({ width: 4, depth: 4 });
+  await page.getByTestId('catalog-patio-umbrella').click();
+  await placeAt(page, 2, 5);
+  const decorated = await saved(page);
+  expect(roofItems(decorated).filter(item => ['canopy', 'patio-umbrella'].includes(item.kind))).toHaveLength(2);
+  expect(roofItems(decorated).filter(item => item.kind === 'dining-table')).toEqual(roofItems(initial).filter(item => item.kind === 'dining-table'));
+  await ready(page, true);
+  await canvas(page).evaluate(node => node.scrollIntoView({ block: 'center', behavior: 'instant' }));
+  const sceneBox = await canvas(page).boundingBox();
+  await page.screenshot({ path: info.outputPath('enclosed-roof-access-and-outdoor-covers.png'), clip: sceneBox! });
+
+  await button(page, 'Edit lantai 2').click();
+  await ready(page, false);
+  await expect(canvas(page)).toHaveAttribute('data-landing-guardrails', '0');
+  await button(page, 'Eksterior').click();
+  await button(page, 'Atap genteng').click();
+  await ready(page, false);
+  await expect(button(page, 'Edit rooftop')).toHaveCount(0);
+  await expect(canvas(page)).toHaveAttribute('data-rooftop-enclosures', '0');
+  const tiled = await saved(page);
+  expect(floors(tiled).at(-1)!.items.some(item => item.roofAccess)).toBe(false);
+  expect(tiled.items.filter(item => item.kind === 'stairs')).toEqual(initial.items.filter(item => item.kind === 'stairs'));
+  expect(tiled.rooftop).toEqual(decorated.rooftop);
+  await page.reload();
+  await ready(page);
+  await expect(button(page, 'Edit rooftop')).toHaveCount(0);
+  expect(await saved(page)).toEqual(tiled);
+  await editRoof(page);
+  await expect(canvas(page)).toHaveAttribute('data-rooftop-stair-access', 'enclosed');
+  expect(await data(page, 'rooftop-items')).toEqual(renderedRoofItems(decorated));
+  await button(page, 'Eksterior').click();
+  await button(page, 'Terbuka').click();
+  await expect(canvas(page)).toHaveAttribute('data-rooftop-stair-access', 'open');
+  await expect(canvas(page)).toHaveAttribute('data-rooftop-enclosures', '0');
   expect(errors).toEqual([]);
 });
 
@@ -216,7 +285,7 @@ test('a full upper floor keeps furniture intact and stair access can be added af
   if ((await saved(page)).items.every(item => item.kind !== 'stairs')) await button(page, 'Tambah tangga ke rooftop').click();
   await expect.poll(async () => (await saved(page)).items.some(item => item.kind === 'stairs')).toBe(true);
   await ready(page, true);
-  expect((await data<unknown[]>(page, 'stair-openings')).length).toBeGreaterThan(0);
+  await expect.poll(async () => (await data<unknown[]>(page, 'stair-openings')).length).toBeGreaterThan(0);
   expect((await saved(page)).rooftop).toEqual(crowded.rooftop);
   expect(errors).toEqual([]);
 });

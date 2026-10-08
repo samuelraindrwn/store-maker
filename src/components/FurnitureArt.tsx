@@ -4,6 +4,19 @@ export default function FurnitureArt({ kind, color = '#bea78b' }: { kind: ItemKi
   const wood = '#c49767';
   return <svg viewBox="0 0 100 82" aria-hidden="true" className="furniture-art">
     <ellipse cx="52" cy="72" rx="31" ry="6" fill="#443346" opacity=".09" />
+    {kind === 'canopy' && <>
+      <path d="M22 34v33m16-25v33m39-46v37m-18-43v33" stroke={wood} strokeWidth="3" />
+      <path d="m13 34 30-25 42 14-32 26z" fill={color} /><path d="m43 9 8 30 34-16z" fill="#e6d9c5" />
+      <path d="m24 25 10-8 28 24-9 8zm19-16 9 3 22 20-12 9z" fill="#f7efdf" />
+      <path d="m13 34 40 15v8L13 42zm40 15 32-26v8L53 57z" fill={color} />
+      <path d="m17 41 35 13m4-2 24-21" fill="none" stroke="#f7efdf" strokeWidth="3" />
+    </>}
+    {kind === 'patio-umbrella' && <>
+      <ellipse cx="28" cy="68" rx="10" ry="4" fill="#a79b8c" /><path d="M28 65V24l25-11" fill="none" stroke={wood} strokeWidth="3" />
+      <path d="m13 31 40-21 35 23-8 8-13-1-14 9-15-6-14 1z" fill={color} />
+      <path d="m53 10-15 33 15 6 14-9z" fill="#f7efdf" /><path d="m53 10-40 21 11 13z" fill="#f7efdf" />
+      <path d="m53 10 35 23-8 8z" fill="#ede1cd" /><path d="M53 10V6" stroke={wood} strokeWidth="3" strokeLinecap="round" />
+    </>}
     {kind === 'stairs' && <>
       <path d="m18 66 16 8 51-23V13L68 6 18 56z" fill={color} />
       <path d="m18 61 16 8 12-6v-9l11-5v-9l11-5v-9l12-5v-9L68 6 57 17v10l-11 5v9l-12 5v9z" fill="#e0c29a" />

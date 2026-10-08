@@ -1,11 +1,14 @@
 export type ItemKind = 'shelf' | 'table' | 'counter' | 'rack' | 'plant' | 'rug' | 'lamp' | 'stool' | 'chalkboard' | 'poster-stand' | 'direction-sign'
   | 'glass-cabinet' | 'display-plinth' | 'pegboard' | 'food-display' | 'drinks-fridge' | 'coffee-station' | 'prep-counter' | 'stove' | 'sink' | 'dining-table' | 'service-cart'
-  | 'stairs' | 'warehouse-rack' | 'bathroom' | 'toilet' | 'washbasin' | 'shower'
+  | 'stairs' | 'warehouse-rack' | 'bathroom' | 'toilet' | 'washbasin' | 'shower' | 'canopy' | 'patio-umbrella'
 export type ProductKind = 'books' | 'ceramics' | 'plants' | 'fashion' | 'vinyl' | 'shoes' | 'bags' | 'skincare' | 'toys'
   | 'bread' | 'pastries' | 'drinks' | 'fruit' | 'meals' | 'snacks' | 'none'
 export type Rotation = 0 | 90 | 180 | 270
-export type WallItemKind = 'window' | 'wall-lamp' | 'wall-shelf' | 'painting' | 'wall-sign'
+export type WallItemKind = 'window' | 'wall-lamp' | 'wall-shelf' | 'painting' | 'wall-sign' | 'wall-clock'
 export type WindowStyle = 'classic' | 'picture' | 'grid' | 'sliding' | 'arched'
+export type WallLampStyle = 'sconce' | 'lantern' | 'bulkhead'
+export type WallSignStyle = 'plaque' | 'fascia' | 'projecting'
+export type WallItemMount = 'interior' | 'exterior'
 export type WallSide = 'back' | 'left' | 'front' | 'right'
 export interface WallItem {
   id: string
@@ -20,6 +23,9 @@ export interface WallItem {
   width?: number
   sizeHeight?: number
   windowStyle?: WindowStyle
+  mount?: WallItemMount
+  wallLampStyle?: WallLampStyle
+  wallSignStyle?: WallSignStyle
 }
 export interface WallRun { wall: WallSide; line: number; start: number; end: number }
 export interface WallCatalogEntry {
@@ -50,6 +56,8 @@ export interface ShopItem {
   stock: ProductKind
   width?: number
   depth?: number
+  /** Automatically created roof access; ordinary floor-to-floor stairs stay independent. */
+  roofAccess?: boolean
 }
 
 export interface ShopDocument {
@@ -74,9 +82,9 @@ export interface ShopDocument {
   exterior?: ExteriorDesign
 }
 
-export interface RoofDesign { style: 'tiles' | 'rooftop'; color: string; garden: boolean }
+export interface RoofDesign { style: 'tiles' | 'rooftop'; color: string; garden: boolean; stairAccess?: 'open' | 'enclosed' }
 export interface RooftopDesign { items: ShopItem[]; floorColor: string }
-export interface ExteriorDesign { wallColor: string; trimColor: string; awning: boolean }
+export interface ExteriorDesign { wallColor: string; trimColor: string; awning: boolean; wallMaterial?: 'plaster' | 'brick' }
 export const MAX_LEVELS = 4
 
 export interface CatalogEntry {
@@ -113,6 +121,8 @@ export const CATALOG: CatalogEntry[] = [
   { kind: 'dining-table', name: 'Meja makan', description: 'Tempat menikmati hidangan di dalam kedai.', width: 2, depth: 2, color: '#C5A37C', stockable: false },
   { kind: 'service-cart', name: 'Troli saji', description: 'Troli ringkas untuk makanan dan minuman siap diantar.', width: 1, depth: 1, color: '#BFA6C9', stockable: true },
   { kind: 'stairs', name: 'Tangga', description: 'Tangga dengan pegangan untuk menghubungkan lantai toko.', width: 2, depth: 3, color: '#BB9775', stockable: false },
+  { kind: 'canopy', name: 'Tenda kanopi', description: 'Naungan kain untuk meja dan kursi. Panjang dan lebarnya bisa diatur.', width: 3, depth: 3, color: '#B7A1CE', stockable: false },
+  { kind: 'patio-umbrella', name: 'Payung taman', description: 'Payung outdoor dengan tiang di samping, bisa diperlebar.', width: 3, depth: 3, color: '#D9B58A', stockable: false },
   { kind: 'warehouse-rack', name: 'Rak gudang', description: 'Rak penyimpanan tinggi dengan kardus stok yang tertata rapi.', width: 2, depth: 1, color: '#7E9E9C', stockable: false },
   { kind: 'bathroom', name: 'WC / kamar mandi', description: 'Kamar mandi kecil dengan toilet, wastafel, dan dinding privasi.', width: 2, depth: 2, color: '#B4CDC8', stockable: false },
   { kind: 'toilet', name: 'Toilet', description: 'Toilet terpisah untuk kamar mandi yang kamu tata sendiri.', width: 1, depth: 1, color: '#F4F0E5', stockable: false },
@@ -131,7 +141,8 @@ export const WALL_CATALOG: WallCatalogEntry[] = [
   { kind: 'wall-lamp', name: 'Lampu dinding', description: 'Cahaya hangat untuk sudut pilihanmu.', width: 0.45, height: 0.7, depth: 0.3, color: '#BC9870' },
   { kind: 'wall-shelf', name: 'Rak buku tempel', description: 'Rak kecil yang menempel pada dinding.', width: 1.5, height: 0.85, depth: 0.35, color: '#BC8F69' },
   { kind: 'painting', name: 'Lukisan', description: 'Sentuhan warna untuk menceritakan tokomu.', width: 0.9, height: 1.1, depth: 0.08, color: '#B498C4' },
-  { kind: 'wall-sign', name: 'Papan nama', description: 'Tulisan pilihanmu di dalam toko.', width: 1.6, height: 0.55, depth: 0.1, color: '#C69972' },
+  { kind: 'wall-sign', name: 'Papan nama', description: 'Tulisan pilihanmu untuk ruangan atau fasad toko.', width: 1.6, height: 0.55, depth: 0.1, color: '#C69972' },
+  { kind: 'wall-clock', name: 'Jam dinding', description: 'Jarumnya mengikuti waktu di tokomu.', width: 0.7, height: 0.7, depth: 0.12, color: '#B98D64' },
 ]
 
 export const WINDOW_STYLES: { id: WindowStyle; label: string }[] = [
@@ -142,10 +153,24 @@ export const WINDOW_STYLES: { id: WindowStyle; label: string }[] = [
   { id: 'arched', label: 'Lengkung' },
 ]
 
+export const WALL_LAMP_STYLES: { id: WallLampStyle; label: string }[] = [
+  { id: 'sconce', label: 'Kap klasik' },
+  { id: 'lantern', label: 'Lentera' },
+  { id: 'bulkhead', label: 'Lampu oval' },
+]
+
+export const WALL_SIGN_STYLES: { id: WallSignStyle; label: string }[] = [
+  { id: 'plaque', label: 'Papan kayu' },
+  { id: 'fascia', label: 'Papan toko besar' },
+  { id: 'projecting', label: 'Papan menjorok' },
+]
+
 // Internal copies keep validation independent from presentation code using CATALOG.
 const catalogByKind = Object.freeze(Object.fromEntries(CATALOG.map(entry => [entry.kind, Object.freeze({ ...entry })]))) as Readonly<Record<ItemKind, CatalogEntry>>
 const wallCatalogByKind = Object.freeze(Object.fromEntries(WALL_CATALOG.map(entry => [entry.kind, Object.freeze({ ...entry })]))) as Readonly<Record<WallItemKind, WallCatalogEntry>>
 const windowStyles: ReadonlySet<string> = new Set(WINDOW_STYLES.map(style => style.id))
+const wallLampStyles: ReadonlySet<string> = new Set(WALL_LAMP_STYLES.map(style => style.id))
+const wallSignStyles: ReadonlySet<string> = new Set(WALL_SIGN_STYLES.map(style => style.id))
 const rotations: readonly number[] = [0, 90, 180, 270]
 const stocks: readonly ProductKind[] = Object.freeze(['books', 'ceramics', 'plants', 'fashion', 'vinyl', 'shoes', 'bags', 'skincare', 'toys', ...FOOD_PRODUCTS, 'none'])
 const foodStocks: readonly ProductKind[] = Object.freeze([...FOOD_PRODUCTS, 'none'])
@@ -156,13 +181,13 @@ const initialStocks: Readonly<Partial<Record<ItemKind, ProductKind>>> = Object.f
   pegboard: 'bags', 'food-display': 'pastries', 'drinks-fridge': 'drinks', 'service-cart': 'meals',
 })
 const itemKeys = ['id', 'kind', 'x', 'z', 'rotation', 'color', 'stock'] as const
-const optionalItemKeys = ['width', 'depth'] as const
+const optionalItemKeys = ['width', 'depth', 'roofAccess'] as const
 const allowedItemKeys = [...itemKeys, ...optionalItemKeys] as const
 const documentKeys = ['version', 'name', 'width', 'depth', 'wallColor', 'floorColor', 'items'] as const
 const optionalDocumentKeys = ['wallHeight', 'entrance', 'floorCells', 'wallItems', 'partitions', 'interiorDoors'] as const
 const buildingDocumentKeys = ['upperFloors', 'roof', 'rooftop', 'exterior'] as const
 const wallItemKeys = ['id', 'kind', 'wall', 'line', 'offset', 'height', 'color', 'text', 'lit'] as const
-const optionalWallItemKeys = ['width', 'sizeHeight', 'windowStyle'] as const
+const optionalWallItemKeys = ['width', 'sizeHeight', 'windowStyle', 'mount', 'wallLampStyle', 'wallSignStyle'] as const
 const allowedWallItemKeys = [...wallItemKeys, ...optionalWallItemKeys] as const
 const MAX_WALL_ITEMS = 60
 const MAX_ITEMS = 200
@@ -207,13 +232,15 @@ function isColor(value: unknown): value is string {
 }
 
 function isRoofDesign(value: unknown): value is RoofDesign {
-  return isRecord(value) && exactKeys(value, ['style', 'color', 'garden'])
+  return isRecord(value) && keysWithOptional(value, ['style', 'color', 'garden'], ['stairAccess'])
     && (value.style === 'tiles' || value.style === 'rooftop') && isColor(value.color) && typeof value.garden === 'boolean'
+    && (!own(value, 'stairAccess') || value.stairAccess === 'open' || value.stairAccess === 'enclosed')
 }
 
 function isExteriorDesign(value: unknown): value is ExteriorDesign {
-  return isRecord(value) && exactKeys(value, ['wallColor', 'trimColor', 'awning'])
+  return isRecord(value) && keysWithOptional(value, ['wallColor', 'trimColor', 'awning'], ['wallMaterial'])
     && isColor(value.wallColor) && isColor(value.trimColor) && typeof value.awning === 'boolean'
+    && (!own(value, 'wallMaterial') || value.wallMaterial === 'plaster' || value.wallMaterial === 'brick')
 }
 
 function isWallHeight(value: unknown): value is number {
@@ -306,6 +333,9 @@ function isWallItem(value: unknown): value is WallItem {
   if (own(value, 'width') && !isWallDimension(value.width, 24)) return false
   if (own(value, 'sizeHeight') && !isWallDimension(value.sizeHeight, 4.5)) return false
   if (own(value, 'windowStyle') && (value.kind !== 'window' || typeof value.windowStyle !== 'string' || !windowStyles.has(value.windowStyle))) return false
+  if (own(value, 'mount') && value.mount !== 'interior' && value.mount !== 'exterior') return false
+  if (own(value, 'wallLampStyle') && (value.kind !== 'wall-lamp' || typeof value.wallLampStyle !== 'string' || !wallLampStyles.has(value.wallLampStyle))) return false
+  if (own(value, 'wallSignStyle') && (value.kind !== 'wall-sign' || typeof value.wallSignStyle !== 'string' || !wallSignStyles.has(value.wallSignStyle))) return false
   return typeof value.id === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(value.id)
     && typeof value.kind === 'string' && own(wallCatalogByKind, value.kind)
     && wallSides.includes(value.wall as WallSide)
@@ -319,13 +349,21 @@ function isWallItem(value: unknown): value is WallItem {
 /** Accessory dimensions; mounting height remains item.height and depth is catalog-defined. */
 export function getWallItemSize(item: WallItem): { width: number; height: number; depth: number } {
   const entry = wallCatalogByKind[item.kind]
-  return { width: item.width ?? entry.width, height: item.sizeHeight ?? entry.height, depth: entry.depth }
+  const width = item.width ?? entry.width
+  const depth = item.kind === 'wall-sign' && getWallSignStyle(item) === 'projecting' ? Math.max(0.3, width * 0.45)
+    : item.kind === 'wall-sign' && getWallSignStyle(item) === 'fascia' ? 0.16 : entry.depth
+  return { width, height: item.sizeHeight ?? entry.height, depth }
 }
 
 /** Old windows retain their original appearance without materializing a new field. */
 export function getWindowStyle(item: WallItem): WindowStyle {
   return item.windowStyle ?? 'classic'
 }
+
+/** Windows remain one shared opening, regardless of the view used to edit them. */
+export function getWallItemMount(item: WallItem): WallItemMount { return item.kind === 'window' ? 'interior' : item.mount ?? 'interior' }
+export function getWallLampStyle(item: WallItem): WallLampStyle { return item.wallLampStyle ?? 'sconce' }
+export function getWallSignStyle(item: WallItem): WallSignStyle { return item.wallSignStyle ?? 'plaque' }
 
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(value)
 const gridCoordinate = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= MIN_FLOOR_COORD && value <= MAX_FLOOR_COORD + 1
@@ -478,6 +516,7 @@ function validPartitions(doc: ShopDocument): boolean {
 
 function wallItemsOverlap(a: WallItem, b: WallItem): boolean {
   if (a.wall !== b.wall || a.line !== b.line) return false
+  if (a.kind !== 'window' && b.kind !== 'window' && getWallItemMount(a) !== getWallItemMount(b)) return false
   const first = getWallItemSize(a)
   const second = getWallItemSize(b)
   return Math.abs(a.offset - b.offset) < (first.width + second.width) / 2 - 0.000001
@@ -496,12 +535,13 @@ function fitsWallItem(doc: ShopDocument, item: WallItem, existing: WallItem[], r
 
 export function wallItemPosition(doc: ShopDocument, item: WallItem): { x: number; y: number; z: number; rotation: number } {
   const horizontal = wallIsHorizontal(item.wall)
-  const inward = item.wall === 'back' || item.wall === 'left' ? 0.012 : -0.012
+  const exterior = getWallItemMount(item) === 'exterior'
+  const inward = (item.wall === 'back' || item.wall === 'left' ? 1 : -1) * (exterior ? -0.162 : 0.012)
   return {
     x: horizontal ? item.offset - doc.width / 2 : item.line - doc.width / 2 + inward,
     y: item.height,
     z: horizontal ? item.line - doc.depth / 2 + inward : item.offset - doc.depth / 2,
-    rotation: { back: 0, left: Math.PI / 2, front: Math.PI, right: -Math.PI / 2 }[item.wall],
+    rotation: { back: 0, left: Math.PI / 2, front: Math.PI, right: -Math.PI / 2 }[item.wall] + (exterior ? Math.PI : 0),
   }
 }
 
@@ -623,7 +663,8 @@ export function updateWallItem(doc: ShopDocument, id: string, patch: Partial<Wal
   const size = getWallItemSize(candidate)
   const currentSize = getWallItemSize(current)
   if (wallItemKeys.every(key => candidate[key] === current[key]) && size.width === currentSize.width && size.height === currentSize.height
-    && getWindowStyle(candidate) === getWindowStyle(current)) return doc
+    && getWindowStyle(candidate) === getWindowStyle(current) && getWallItemMount(candidate) === getWallItemMount(current)
+    && getWallLampStyle(candidate) === getWallLampStyle(current) && getWallSignStyle(candidate) === getWallSignStyle(current)) return doc
   return { ...doc, wallItems: items.map(item => item.id === id ? candidate : item) }
 }
 
@@ -778,6 +819,7 @@ function isItem(value: unknown): value is ShopItem {
   if (!isRecord(value) || !keysWithOptional(value, itemKeys, optionalItemKeys)) return false
   if (own(value, 'width') && !isItemDimension(value.width)) return false
   if (own(value, 'depth') && !isItemDimension(value.depth)) return false
+  if (own(value, 'roofAccess') && (value.kind !== 'stairs' || typeof value.roofAccess !== 'boolean')) return false
   if (typeof value.id !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(value.id)) return false
   if (!isKind(value.kind) || !rotations.includes(value.rotation as number) || !isColor(value.color)) return false
   if (typeof value.x !== 'number' || !Number.isInteger(value.x) || value.x < MIN_FLOOR_COORD || value.x > MAX_FLOOR_COORD) return false
@@ -804,6 +846,8 @@ export function getItemFootprint(item: ShopItem): { width: number; depth: number
   return item.rotation === 90 || item.rotation === 270 ? { width: size.depth, depth: size.width } : size
 }
 
+export function isOutdoorCover(kind: ItemKind): boolean { return kind === 'canopy' || kind === 'patio-umbrella' }
+
 export function canPlace(doc: ShopDocument, item: ShopItem, ignoreId?: string): boolean {
   if (!isDimension(doc.width) || !isDimension(doc.depth) || !Array.isArray(doc.items) || !isItem(item)) return false
   if (doc.floorCells?.length === 0) return false
@@ -826,6 +870,8 @@ export function canPlace(doc: ShopDocument, item: ShopItem, ignoreId?: string): 
     if (other.id === item.id) return false
     // Rugs are a separate floor layer; two rugs still cannot occupy the same cells.
     if ((item.kind === 'rug') !== (other.kind === 'rug')) return true
+    // Shade is above the furniture; two overlapping covers still collide.
+    if (isOutdoorCover(item.kind) !== isOutdoorCover(other.kind)) return true
     const otherSize = getItemFootprint(other)
     return item.x + footprint.width <= other.x || other.x + otherSize.width <= item.x
       || item.z + footprint.depth <= other.z || other.z + otherSize.depth <= item.z
@@ -859,8 +905,8 @@ export function getLevelDocument(doc: ShopDocument, index: number): ShopDocument
 }
 
 /** Defaults remain virtual so opening a legacy design never changes its saved shape. */
-export function getRoof(doc: ShopDocument): RoofDesign {
-  return doc.roof ? { ...doc.roof } : { style: 'tiles', color: '#B96B51', garden: false }
+export function getRoof(doc: ShopDocument): Required<RoofDesign> {
+  return { style: 'tiles', color: '#B96B51', garden: false, stairAccess: 'open', ...doc.roof }
 }
 
 function rooftopFloor(doc: ShopDocument, rooftop: RooftopDesign): ShopDocument {
@@ -983,7 +1029,7 @@ export function ensureRooftopAccess(doc: ShopDocument): ShopDocument {
   const index = getLevelCount(doc) - 1
   const top = getLevelDocument(doc, index)
   if (hasRooftopAccess(doc)) return doc
-  const stairs = { ...createItem('stairs'), depth: 4 }
+  const stairs = { ...createItem('stairs'), depth: 4, roofAccess: true }
   const lowerStairs = index > 0 ? getLevelDocument(doc, index - 1).items.find(item => item.kind === 'stairs') : undefined
   const candidates: ShopItem[] = lowerStairs ? [{ ...stairs, x: lowerStairs.x, z: lowerStairs.z, rotation: lowerStairs.rotation }] : []
   const bounds = getFloorBounds(top)
@@ -1002,26 +1048,34 @@ export function getExterior(doc: ShopDocument): ExteriorDesign {
   return doc.exterior ? { ...doc.exterior } : { wallColor: '#EADCCA', trimColor: '#847293', awning: true }
 }
 
+export function getExteriorWallMaterial(doc: ShopDocument): 'plaster' | 'brick' { return doc.exterior?.wallMaterial ?? 'plaster' }
+
 export function setRoof(doc: ShopDocument, patch: Partial<RoofDesign>): ShopDocument {
-  if (!isRecord(patch) || Reflect.ownKeys(patch).some(key => key !== 'style' && key !== 'color' && key !== 'garden')) return doc
+  if (!isRecord(patch) || Reflect.ownKeys(patch).some(key => key !== 'style' && key !== 'color' && key !== 'garden' && key !== 'stairAccess')) return doc
   const current = getRoof(doc)
   const roof = { ...current, ...patch }
   if (!isRoofDesign(roof)) return doc
-  const unchanged = current.style === roof.style && current.color === roof.color && current.garden === roof.garden
+  const unchanged = current.style === roof.style && current.color === roof.color && current.garden === roof.garden && current.stairAccess === roof.stairAccess
   if (unchanged) return doc
   let result: ShopDocument = { ...doc, roof }
   if (roof.style === 'rooftop') {
     if (current.style !== 'rooftop') result = ensureRooftopAccess(result)
     if (!result.rooftop) result = { ...result, rooftop: starterRooftop(result) }
+  } else {
+    const index = getLevelCount(result) - 1
+    const top = getLevelDocument(result, index)
+    const items = top.items.filter(item => item.kind !== 'stairs' || !item.roofAccess)
+    if (items.length !== top.items.length) result = replaceLevelDocument(result, index, { ...top, items })
   }
   return result
 }
 
 export function setExterior(doc: ShopDocument, patch: Partial<ExteriorDesign>): ShopDocument {
-  if (!isRecord(patch) || Reflect.ownKeys(patch).some(key => key !== 'wallColor' && key !== 'trimColor' && key !== 'awning')) return doc
+  if (!isRecord(patch) || Reflect.ownKeys(patch).some(key => key !== 'wallColor' && key !== 'trimColor' && key !== 'awning' && key !== 'wallMaterial')) return doc
   const current = getExterior(doc)
   const exterior = { ...current, ...patch }
-  if (!isExteriorDesign(exterior) || (current.wallColor === exterior.wallColor && current.trimColor === exterior.trimColor && current.awning === exterior.awning)) return doc
+  if (!isExteriorDesign(exterior) || (current.wallColor === exterior.wallColor && current.trimColor === exterior.trimColor && current.awning === exterior.awning
+    && (current.wallMaterial ?? 'plaster') === (exterior.wallMaterial ?? 'plaster'))) return doc
   return { ...doc, exterior }
 }
 
@@ -1170,6 +1224,7 @@ export function createInitialShop(): ShopDocument {
     ...getWallItems(shop),
     window('ground-front-window', 'front', 9, 2.2),
     window('ground-right-window', 'right', 10, 5),
+    { ...createWallItem('wall-clock'), id: 'ground-wall-clock', wall: 'back', line: 0, offset: 2.5, height: 2.35 },
   ]
   return addDefaultStandingSign(shop)
 }

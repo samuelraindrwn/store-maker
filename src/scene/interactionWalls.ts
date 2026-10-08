@@ -26,7 +26,7 @@ export function intersectWallPlane(ray: THREE.Ray, shop: ShopDocument, mount: Pi
 }
 
 /** Mathematical faces keep window openings usable as placement/drag surfaces. */
-export function intersectWall(ray: THREE.Ray, shop: ShopDocument, fallback?: WallItem): WallHit | null {
+export function intersectWall(ray: THREE.Ray, shop: ShopDocument, fallback?: WallItem, exterior = false): WallHit | null {
   const runs = getWallRuns(shop);
   if (!runs.length) return null;
   const intersections: WallHit[] = [];
@@ -35,7 +35,8 @@ export function intersectWall(ray: THREE.Ray, shop: ShopDocument, fallback?: Wal
     // Hidden front/right faces must not intercept an ordinary click aimed at
     // the visible back/left wall. An explicitly selected source can be dragged
     // from its outside face, preserving front/right editing from the same view.
-    if (!sourceWall && ray.direction.dot(wallInwardNormal(run.wall)) >= -0.000001) continue;
+    const facing = ray.direction.dot(wallInwardNormal(run.wall));
+    if (!sourceWall && (exterior ? facing <= 0.000001 : facing >= -0.000001)) continue;
     const hit = intersectWallPlane(ray, shop, run);
     if (!hit || hit.offset < run.start - 0.001 || hit.offset > run.end + 0.001 || hit.height < 0 || hit.height > getWallHeight(shop)) continue;
     intersections.push(hit);

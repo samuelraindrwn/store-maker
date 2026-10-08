@@ -1,16 +1,21 @@
 import { ArrowRight, Check, Home, Paintbrush, Sun } from 'lucide-react';
-import { getExterior, getRoof, getRooftopDocument, replaceRooftopDocument, setExterior, setRoof, type ShopDocument } from '../model';
+import { getExterior, getRoof, getRooftopDocument, replaceRooftopDocument, setExterior, setRoof, getLevelCount, getLevelDocument, getWallItems, getWallItemMount, getExteriorWallMaterial, WALL_CATALOG, WALL_LAMP_STYLES, WALL_SIGN_STYLES, type WallSignStyle, type ShopDocument, type WallItemKind, type WallLampStyle } from '../model';
+import WallArt from './WallArt';
 
 const FACADES = ['#EADCCA', '#C8D4BE', '#DABAC5', '#BECAD9', '#D8B28E', '#C4B5D9'];
 const TRIMS = ['#847293', '#657B70', '#A77653', '#EEE7D8', '#526478', '#A96665'];
 const ROOFS = ['#B96B51', '#A85C54', '#728475', '#74798A', '#C4A77C', '#827193'];
 
-export default function ExteriorSettings({ building, onChange, onEditRooftop }: { building: ShopDocument; onChange: (doc: ShopDocument) => void; onEditRooftop: () => void }) {
+export default function ExteriorSettings({ building, onChange, onEditRooftop, activeLevel, onSelectLevel, onSelectWall, onAddWall }: { building: ShopDocument; onChange: (doc: ShopDocument) => void; onEditRooftop: () => void; activeLevel: number; onSelectLevel: (level: number) => void; onSelectWall: (id: string) => void; onAddWall: (kind: WallItemKind, lampStyle?: WallLampStyle, signStyle?: WallSignStyle) => void }) {
   const exterior = getExterior(building);
   const roof = getRoof(building);
+  const accessories = getWallItems(getLevelDocument(building, activeLevel)).filter(item => item.kind === 'window' || getWallItemMount(item) === 'exterior');
   return <div className="exterior-settings" data-testid="exterior-settings">
     <div className="library-heading"><span className="eyebrow">DARI LUAR, JATUH HATI</span><h2>Satu toko.<br />Banyak cerita.</h2><p>Fasad hangat, atap pilihanmu.</p></div>
     <div className="exterior-section-heading"><Paintbrush size={16} /><h3>Warna bangunan</h3></div>
+    <div className="facade-material-options" role="group" aria-label="Material fasad">
+      {(['plaster', 'brick'] as const).map(material => <button key={material} className={getExteriorWallMaterial(building) === material ? 'active' : ''} aria-pressed={getExteriorWallMaterial(building) === material} onClick={() => onChange(setExterior(building, { wallMaterial: material }))}><span className={`material-swatch material-${material}`} />{material === 'brick' ? 'Bata' : 'Plester'}</button>)}
+    </div>
     <ExteriorColors label="fasad" colors={FACADES} value={exterior.wallColor} onChange={wallColor => onChange(setExterior(building, { wallColor }))} />
     <ExteriorColors label="lis fasad" colors={TRIMS} value={exterior.trimColor} onChange={trimColor => onChange(setExterior(building, { trimColor }))} />
     <label className="building-toggle"><span><Sun size={16} /><span>Kanopi toko<small>Naungan di atas pintu masuk.</small></span></span><input type="checkbox" aria-label="Kanopi toko" checked={exterior.awning} onChange={event => onChange(setExterior(building, { awning: event.target.checked }))} /></label>
@@ -22,9 +27,22 @@ export default function ExteriorSettings({ building, onChange, onEditRooftop }: 
       </button>)}
     </div>
     <ExteriorColors label={roof.style === 'rooftop' ? 'lantai rooftop' : 'atap'} colors={ROOFS} value={roof.style === 'rooftop' ? getRooftopDocument(building).floorColor : roof.color} onChange={color => onChange(roof.style === 'rooftop' ? replaceRooftopDocument(building, { ...getRooftopDocument(building), floorColor: color }) : setRoof(building, { color }))} />
-    {roof.style === 'rooftop' && <div className="roof-access-card"><p>Rooftop bisa diisi meja, tanaman, dan perabot. Tangga terhubung dari lantai paling atas.</p><button className="button button-purple full-width" onClick={onEditRooftop}><Sun size={16} />Tata rooftop<ArrowRight size={16} /></button></div>}
-    <p className="wall-catalog-note">Pintu dan jendela mengikuti desain Interior. Pindah ke Interior untuk menggeser pintu, memasang jendela, dan menata ruangan.</p>
+    {roof.style === 'rooftop' && <><RoofAccessPicker building={building} onChange={onChange} /><div className="roof-access-card"><p>Tata area duduk, tenda, dan tanaman di rooftop. Tangga terhubung dari lantai paling atas.</p><button className="button button-purple full-width" onClick={onEditRooftop}><Sun size={16} />Tata rooftop<ArrowRight size={16} /></button></div></>}
+    <div className="exterior-section-heading"><Paintbrush size={16} /><h3>Dekorasi luar</h3></div>
+    <label className="exterior-level-select"><span className="field-label">LANTAI YANG DITATA</span><select aria-label="Lantai dekorasi eksterior" value={activeLevel} onChange={event => onSelectLevel(Number(event.target.value))}>{Array.from({ length: getLevelCount(building) }, (_, level) => <option key={level} value={level}>Lantai {level + 1}</option>)}</select></label>
+    <div className="catalog-grid exterior-catalog">
+      <button className="catalog-card" aria-label="Tambah jendela eksterior" onClick={() => onAddWall('window')}><WallArt kind="window" color="#F5EAD6" /><strong>Jendela</strong></button>
+      {WALL_SIGN_STYLES.map(style => <button key={style.id} className="catalog-card" aria-label={`Tambah signage ${style.label}`} onClick={() => onAddWall('wall-sign', undefined, style.id)}><WallArt kind="wall-sign" color="#78638E" wallSignStyle={style.id} /><strong>{style.label}</strong><span>Signage luar</span></button>)}
+      {WALL_LAMP_STYLES.map(style => <button key={style.id} className="catalog-card" aria-label={`Tambah lampu luar ${style.label}`} onClick={() => onAddWall('wall-lamp', style.id)}><WallArt kind="wall-lamp" color="#B08B63" wallLampStyle={style.id} /><strong>{style.label}</strong><span>Lampu luar</span></button>)}
+    </div>
+    <div className="exterior-accessory-list"><span className="field-label">TERPASANG DI LANTAI {activeLevel + 1}</span>{accessories.map((item, index) => <button key={item.id} onClick={() => onSelectWall(item.id)} aria-label={`Edit ${WALL_CATALOG.find(entry => entry.kind === item.kind)?.name} luar ${index + 1}`}><WallArt kind={item.kind} color={item.color} wallLampStyle={item.wallLampStyle} wallSignStyle={item.wallSignStyle} /><span>{WALL_CATALOG.find(entry => entry.kind === item.kind)?.name}</span><ArrowRight size={14} /></button>)}{!accessories.length && <p className="wall-catalog-note">Pilih dekorasi, lalu pasang pada sisi bangunan.</p>}</div>
+    <p className="wall-catalog-note">Jendela terhubung dengan Interior. Pilih lantai dan sisi, lalu geser atau atur posisinya dari panel.</p>
   </div>;
+}
+
+export function RoofAccessPicker({ building, onChange }: { building: ShopDocument; onChange: (doc: ShopDocument) => void }) {
+  const roof = getRoof(building);
+  return <div className="roof-access-options"><span className="field-label">AKSES TANGGA ROOFTOP</span><div className="facade-material-options" role="group" aria-label="Bentuk akses tangga rooftop">{(['open', 'enclosed'] as const).map(stairAccess => <button key={stairAccess} className={roof.stairAccess === stairAccess ? 'active' : ''} aria-pressed={roof.stairAccess === stairAccess} onClick={() => onChange(setRoof(building, { stairAccess }))}>{stairAccess === 'open' ? 'Terbuka' : 'Berdinding & beratap'}</button>)}</div></div>;
 }
 
 function ExteriorColors({ label, colors, value, onChange }: { label: string; colors: string[]; value: string; onChange: (value: string) => void }) {

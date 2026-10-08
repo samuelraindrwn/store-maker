@@ -2,9 +2,15 @@ import * as THREE from 'three';
 import { getFloorBounds } from '../model';
 import type { ShopDocument } from '../model';
 import { buildSkyline } from './skyline';
+import { CityPedestrians, type CityPedestrianState } from './cityPedestrians';
 
 type Primitive = 'box' | 'cylinder' | 'sphere' | 'roof' | 'glow' | 'umbrella' | 'window';
 type Part = { matrix: THREE.Matrix4; color: THREE.Color };
+const pedestrians = new WeakMap<THREE.Group, CityPedestrians>();
+
+export function setCityTimeOfDay(city: THREE.Group, night: boolean, snap = false) { pedestrians.get(city)?.setMode(night, snap); }
+export function updateCityPedestrians(city: THREE.Group, delta: number) { return pedestrians.get(city)?.update(delta) ?? false; }
+export function getCityPedestrianState(city: THREE.Group): CityPedestrianState | undefined { return pedestrians.get(city)?.state; }
 
 /** Decorative city blocks; repeated street details share instanced geometry. */
 export function buildCity(shop: ShopDocument): THREE.Group {
@@ -12,10 +18,12 @@ export function buildCity(shop: ShopDocument): THREE.Group {
   group.name = 'nemu-neighbourhood';
   group.userData.environment = true;
   const parts: Record<Primitive, Part[]> = { box: [], cylinder: [], sphere: [], roof: [], glow: [], umbrella: [], window: [] };
+  const shopBounds: { name: string; x: number; z: number; width: number; depth: number; height: number }[] = [];
+  let buildingScale = 1, buildingX = 0, buildingZ = 0;
   const transform = new THREE.Object3D();
   const add = (kind: Primitive, color: string, x: number, y: number, z: number, sx: number, sy: number, sz: number, rx = 0, ry = 0, rz = 0) => {
-    transform.position.set(x, y, z);
-    transform.scale.set(sx, sy, sz);
+    transform.position.set(buildingX + (x - buildingX) * buildingScale, -0.07 + (y + 0.07) * buildingScale, buildingZ + (z - buildingZ) * buildingScale);
+    transform.scale.set(sx * buildingScale, sy * buildingScale, sz * buildingScale);
     transform.rotation.set(rx, ry, rz);
     transform.updateMatrix();
     parts[kind].push({ matrix: transform.matrix.clone(), color: new THREE.Color(color) });
@@ -27,15 +35,17 @@ export function buildCity(shop: ShopDocument): THREE.Group {
   const bounds = getFloorBounds(shop);
   const front = bounds.maxZ + 1 - shop.depth / 2;
   const back = bounds.minZ - shop.depth / 2;
-  const left = bounds.minX - shop.width / 2;
-  const right = bounds.maxX + 1 - shop.width / 2;
-  const centerX = (left + right) / 2;
+  const centerX = (bounds.minX + bounds.maxX + 1) / 2 - shop.width / 2;
+  // Reserve a consistent neighborhood plot even while the first floor tiles are
+  // being painted; larger neighboring buildings must not collapse into each other.
+  const left = centerX - Math.max(10, bounds.width) / 2;
+  const right = centerX + Math.max(10, bounds.width) / 2;
   const centerZ = (back + front) / 2;
-  const streetWidth = Math.max(34, bounds.width + 18);
+  const streetWidth = Math.max(42, bounds.width + 24);
   group.add(buildSkyline(shop));
 
   // A continuous walking level meets the shop's raised plinth; the road is lower.
-  block('#c9d1bd', centerX, -0.48, centerZ - 2, streetWidth + 4, 0.18, Math.max(30, bounds.depth + 24));
+  block('#c9d1bd', centerX, -0.48, centerZ - 3, streetWidth + 4, 0.18, Math.max(38, bounds.depth + 30));
   block('#b6adb8', centerX, -0.3, front + 4, streetWidth + 4, 0.17, 3.6);
   block('#d5c8b9', centerX, -0.22, front + 1.18, streetWidth, 0.28, 2.05);
   block('#ece1cd', centerX, -0.13, front + 2.15, streetWidth, 0.18, 0.19);
@@ -45,10 +55,10 @@ export function buildCity(shop: ShopDocument): THREE.Group {
   block('#d6cbbd', right + 2.55, -0.23, back - 1.2, 2.6, 0.25, bounds.depth + 8);
   block('#d6cbbd', centerX, -0.22, back - 2.2, streetWidth - 4, 0.25, 2.3);
   // A second lane and planted courtyards connect the surrounding blocks.
-  block('#bfc1c2', centerX, -0.3, back - 8.5, streetWidth, 0.17, 2.5);
-  block('#dce0cc', left - 6.2, -0.32, back - 4, 9.5, 0.13, 12.5);
-  block('#d9dfca', right + 6.1, -0.32, back - 4, 9.5, 0.13, 12.5);
-  for (let x = centerX - streetWidth / 2 + 1; x < centerX + streetWidth / 2; x += 3.4) block('#eee8d6', x, -0.207, back - 8.5, 1.35, 0.012, 0.075);
+  block('#bfc1c2', centerX, -0.3, back - 10.8, streetWidth, 0.17, 2.5);
+  block('#dce0cc', left - 7.0, -0.32, back - 4, 12.5, 0.13, 16.5);
+  block('#d9dfca', right + 7.0, -0.32, back - 4, 12.5, 0.13, 16.5);
+  for (let x = centerX - streetWidth / 2 + 1; x < centerX + streetWidth / 2; x += 3.4) block('#eee8d6', x, -0.207, back - 10.8, 1.35, 0.012, 0.075);
   for (let x = centerX - streetWidth / 2 + 1; x <= centerX + streetWidth / 2 - 1; x += 1.25) {
     block('#beb3a8', x, -0.074, front + 1.16, 0.015, 0.012, 1.82);
     block('#e4d9c6', x, -0.034, front + 2.15, 0.56, 0.012, 0.19);
@@ -72,12 +82,14 @@ export function buildCity(shop: ShopDocument): THREE.Group {
     ctx.fillText(label, 256, 67, 470);
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshStandardMaterial({ map: texture, roughness: 1 }));
-    mesh.position.set(x, y, z);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width * buildingScale, height * buildingScale), new THREE.MeshStandardMaterial({ map: texture, roughness: 1 }));
+    mesh.position.set(buildingX + (x - buildingX) * buildingScale, -0.07 + (y + 0.07) * buildingScale, buildingZ + (z - buildingZ) * buildingScale);
     group.add(mesh);
   };
 
   const building = (x: number, z: number, w: number, h: number, d: number, color: string, trim: string, label: string, roof = false) => {
+    buildingScale = 1.28; buildingX = x; buildingZ = z;
+    shopBounds.push({ name: label, x, z, width: w * buildingScale, depth: d * buildingScale, height: h * buildingScale });
     block(color, x, h / 2 - 0.07, z, w, h, d);
     block('#f1e5d2', x, 0.09, z, w + 0.14, 0.26, d + 0.16);
     const face = z + d / 2;
@@ -130,18 +142,20 @@ export function buildCity(shop: ShopDocument): THREE.Group {
     // A tiny shop planter lends scale without individual foliage meshes.
     block('#bc8c70', x - w * 0.38, 0.14, face + 0.37, 0.34, 0.39, 0.34);
     orb('#85a37a', x - w * 0.38, 0.58, face + 0.37, 0.5, 0.6, 0.45);
+    buildingScale = 1;
   };
-  building(left - 3.6, back - 0.5, 3.25, 3.15, 3.1, '#e2c2ad', '#af8678', 'KOPI PAGI', true);
-  building(left - 3.1, back - 5.3, 3.9, 3.1, 3.2, '#c6d1bd', '#819a8f', 'RUMAH BUKU');
-  building(centerX + 0.75, back - 5.9, 3.4, 3.05, 3.1, '#dbc6da', '#a08ba9', 'SUDUT SENI');
-  building(right + 3.2, back - 4.8, 3.8, 3.65, 3.4, '#eed4b3', '#bf9b78', 'ROTI & RASA');
-  building(right + 4.0, back + 0.1, 3.1, 2.95, 2.9, '#c4d3cf', '#809e9b', 'TOKO BUNGA', true);
-  building(left - 7.55, back - 1.5, 3.4, 4.65, 3.1, '#e4d4aa', '#ab9873', 'TOKO MUSIK');
-  building(right + 8.0, back - 0.9, 3.55, 4.4, 3.3, '#d3c9dd', '#9589a6', 'STUDIO KECIL');
-  building(left - 7.3, back - 6.1, 3.5, 3.2, 2.9, '#c9d6d0', '#8ba699', 'KEDAI TEH', true);
-  building(right + 7.7, back - 6.6, 3.7, 5.35, 3.1, '#ddc4b6', '#b09591', 'RUMAH KARYA');
+  building(left - 4.2, back - 0.5, 3.25, 3.15, 3.1, '#e2c2ad', '#af8678', 'KOPI PAGI', true);
+  building(left - 4.2, back - 6.1, 3.9, 3.1, 3.2, '#c6d1bd', '#819a8f', 'RUMAH BUKU');
+  building(centerX + 1.1, back - 6.5, 3.4, 3.05, 3.1, '#dbc6da', '#a08ba9', 'SUDUT SENI');
+  building(right + 4.5, back - 6.1, 3.8, 3.65, 3.4, '#eed4b3', '#bf9b78', 'ROTI & RASA');
+  building(right + 4.6, back + 0.1, 3.1, 2.95, 2.9, '#c4d3cf', '#809e9b', 'TOKO BUNGA', true);
+  building(left - 9.2, back - 1.5, 3.4, 4.65, 3.1, '#e4d4aa', '#ab9873', 'TOKO MUSIK');
+  building(right + 9.6, back - 0.9, 3.55, 4.4, 3.3, '#d3c9dd', '#9589a6', 'STUDIO KECIL');
+  building(left - 9.5, back - 6.7, 3.5, 3.2, 2.9, '#c9d6d0', '#8ba699', 'KEDAI TEH', true);
+  building(right + 10.0, back - 7.3, 3.7, 5.35, 3.1, '#ddc4b6', '#b09591', 'RUMAH KARYA');
   // Narrow infill shops make a continuous, varied rear streetscape.
-  building(centerX - 2.85, back - 5.7, 2.6, 3.15, 2.9, '#e8d4bb', '#ba9985', 'KIOS KERTAS');
+  building(centerX - 3.8, back - 6.3, 2.6, 3.15, 2.9, '#e8d4bb', '#ba9985', 'KIOS KERTAS');
+  group.userData.shopBounds = shopBounds;
 
   const tree = (x: number, z: number, height = 2.8) => {
     block('#ded0b8', x, -0.03, z, 0.95, 0.13, 0.95);
@@ -151,16 +165,16 @@ export function buildCity(shop: ShopDocument): THREE.Group {
     orb('#7f9d75', x - 0.42, height * 0.74, z + 0.22, 1.25, 1.2, 1.1);
     orb('#a4b88c', x + 0.35, height * 0.92, z - 0.13, 1.18, 1.3, 1.2);
   };
-  tree(left - 1.8, back - 1.65, 2.8);
-  tree(right + 1.7, back - 1.6, 3.2);
+  tree(left - 1.5, back - 3.5, 2.8);
+  tree(right + 1.7, back - 3.0, 3.2);
   tree(left - 5.65, front + 0.9, 2.7);
   tree(right + 5.5, front + 0.9, 2.65);
-  tree(centerX + 4.2, back - 9.1, 3.4);
-  tree(left - 5.3, back - 6.9, 2.4);
-  tree(right + 5.2, back - 6.8, 2.6);
-  tree(left - 9.7, back - 3.9, 3.15);
-  tree(right + 10.25, back - 3.6, 2.8);
-  tree(centerX - 4.4, back - 9.7, 2.6);
+  tree(centerX + 4.8, back - 9.5, 3.4);
+  tree(left - 8.0, front + 0.8, 2.4);
+  tree(right + 9.1, front + 0.9, 2.6);
+  tree(left - 12.0, back - 4.0, 3.15);
+  tree(right + 12.5, back - 4.0, 2.8);
+  tree(centerX - 3.7, back - 9.8, 2.6);
 
   const streetlamp = (x: number, z: number, groundY = -0.068, maxPoolZ = front + 2.04) => {
     post('#726878', x, 0.06, z, 0.15, 0.19);
@@ -240,29 +254,14 @@ export function buildCity(shop: ShopDocument): THREE.Group {
       post('#bda38b', x, 2.32, z, 0.042, 0.15);
     }
   };
-  cafeTable(left - 3.7, back + 2.5, true);
-  cafeTable(left - 6.4, back + 2.55);
-  cafeTable(right + 7.45, back + 2.6, true);
+  cafeTable(left - 4.2, back + 3.0, true);
+  cafeTable(left - 7.0, back + 2.7);
+  cafeTable(right + 9.0, back + 3.0, true);
 
-  // Small, static pedestrians give scale; all scenery remains outside editing hit tests.
-  const pedestrian = (x: number, z: number, shirt: string, facing = 0, bag = false) => {
-    const skin = '#cda98b';
-    for (const dx of [-0.065, 0.065]) {
-      post('#777583', x + dx, 0.18, z, 0.041, 0.45);
-      block('#675f6f', x + dx, -0.034, z + 0.035, 0.1, 0.085, 0.18);
-    }
-    orb(shirt, x, 0.64, z, 0.32, 0.53, 0.26);
-    for (const dx of [-0.17, 0.17]) add('cylinder', shirt, x + dx, 0.61, z, 0.072, 0.39, 0.072, 0, 0, dx > 0 ? 0.17 : -0.17);
-    orb(skin, x, 1.02, z, 0.255, 0.29, 0.25);
-    orb('#64565d', x, 1.105, z - 0.025, 0.267, 0.17, 0.263);
-    if (bag) block('#c3aa82', x + 0.23, 0.46, z, 0.17, 0.3, 0.2, facing);
-  };
-  pedestrian(left - 1.8, front + 1.1, '#9aafad', 0, true);
-  pedestrian(right + 1.25, back + 1.85, '#b2a1b8', 0, true);
-  pedestrian(left - 5.0, back + 2.9, '#c79c86');
-  pedestrian(centerX - 1.6, front + 6.3, '#b4ad87', 0, true);
-  pedestrian(centerX - 1.1, front + 6.1, '#a4b0bd');
-  pedestrian(right + 6.5, back - 1.9, '#c4a0a2');
+  const crowd = new CityPedestrians({ left, right, back, front, centerX,
+    destinations: { cafe: { x: left - 4.2, z: back + 1.2 }, florist: { x: right + 4.6, z: back + 1.6 }, studio: { x: right + 9.6, z: back + 0.9 } } });
+  pedestrians.set(group, crowd);
+  group.add(crowd.group);
 
   // A small neighborhood notice kiosk and bollards finish the street corners.
   for (const x of [left - 1.65, right + 1.2]) for (const dz of [2.05, 5.9]) {

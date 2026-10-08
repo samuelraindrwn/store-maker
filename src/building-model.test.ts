@@ -189,7 +189,7 @@ describe('roof, exterior, and building persistence', () => {
     const source = createInitialShop()
     const rooftop = setRoof(source, { style: 'rooftop', color: '#D5DAC8', garden: true })
     const exterior = setExterior(rooftop, { wallColor: '#123456', trimColor: '#ABCDEF', awning: false })
-    expect(exterior.roof).toEqual({ style: 'rooftop', color: '#D5DAC8', garden: true })
+    expect(exterior.roof).toEqual({ style: 'rooftop', color: '#D5DAC8', garden: true, stairAccess: 'open' })
     expect(exterior.exterior).toEqual({ wallColor: '#123456', trimColor: '#ABCDEF', awning: false })
     expect(source.roof!.style).toBe('tiles')
     expect(setRoof(exterior, {})).toBe(exterior)

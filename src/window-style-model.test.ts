@@ -121,7 +121,7 @@ describe('strict window style validation', () => {
   })
 
   it('rejects style fields on every non-window kind, even an explicit classic or a kind change', () => {
-    const kinds: WallItemKind[] = ['wall-lamp', 'wall-shelf', 'painting', 'wall-sign']
+    const kinds: WallItemKind[] = ['wall-lamp', 'wall-shelf', 'painting', 'wall-sign', 'wall-clock']
     for (const kind of kinds) {
       const item = createWallItem(kind)
       const doc = placeWallItem(createEmptyShop(), item)

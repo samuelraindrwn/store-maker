@@ -197,3 +197,19 @@
 .wall-mount-buttons button:disabled{opacity:.4;cursor:not-allowed}
 .wall-mount-hint{display:block;margin-top:7px;font-size:10px;line-height:1.5;text-align:center}
 @media(max-width:760px){.wall-mount-toolbar{top:55px;padding:8px;max-width:370px}.wall-mount-buttons button{min-height:44px;font-size:10px}.wall-mount-hint{font-size:9px}}
+
+/* Keep scrolling editor controls behind the opaque sticky tab row. */
+.library-panel>.panel-tabs{z-index:8;isolation:isolate;background:#fff}
+.library-panel>.scene-toolbar{position:relative;z-index:1;isolation:isolate}
+.facade-material-options{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 16px}
+.facade-material-options button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:43px;border:1px solid #e4daec;border-radius:10px;padding:10px 6px;background:#faf8fd;color:#7c6a8c;font-size:11px;font-weight:750}
+.facade-material-options button.active{border-color:#b995e0;background:#efe7f8;color:#7650ae;box-shadow:inset 0 0 0 1px #d7c3ef}
+.material-swatch{height:31px;width:100%;max-width:78px;border-radius:5px;background:#eadcca}
+.material-brick{background-color:#c78666;background-image:linear-gradient(#ecd9c1 2px,transparent 2px),linear-gradient(90deg,#ecd9c1 2px,transparent 2px);background-size:100% 11px,23px 22px}
+.exterior-level-select{display:block;margin-bottom:14px}
+.exterior-level-select select{width:100%;border:1px solid #e4daec;border-radius:8px;padding:10px;background:#f9f6fc;color:#685575;font:inherit;font-size:12px}
+.exterior-catalog{margin-bottom:20px}
+.exterior-accessory-list>button{display:flex;align-items:center;gap:8px;width:100%;padding:4px 8px;margin:5px 0;background:#faf7fd;border:1px solid #e9e2ef;border-radius:8px;text-align:left;color:#776185;font-size:11px}
+.exterior-accessory-list .furniture-art{height:42px;width:46px;flex-shrink:0}.exterior-accessory-list>button>span{flex:1}
+.roof-access-options{margin-top:20px}
+.lamp-style-picker{margin-top:18px}.lamp-style-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.lamp-style-options button{border:1px solid #e4daec;border-radius:8px;padding:7px 3px;background:#faf8fd;color:#74627f;font-size:10px}.lamp-style-options button.active{border-color:#a985d1;background:#efe6fb}.lamp-style-options .furniture-art{width:100%;height:58px;display:block}

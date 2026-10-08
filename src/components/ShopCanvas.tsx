@@ -32,6 +32,7 @@ export type ShopCanvasProps = {
   buildTool: 'add' | 'erase' | 'walls' | 'partition';
   showCity: boolean;
   nightMode?: boolean;
+  gameMinutes?: number;
   onSelect: (id: string | null) => void;
   onCell: (x: number, z: number) => void;
   onHover: (cell: Cell | null) => void;
@@ -93,6 +94,7 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
       awaitingFrame.current = true;
       applied.current = latest.current;
       instance.update(latest.current);
+      instance.setGameTime(latest.current.gameMinutes ?? 360);
     } catch (cause) {
       instance?.dispose();
       engine.current = null;
@@ -111,6 +113,11 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
       applied.current = null;
     };
   }, []);
+
+  // Clock hands update in place; ticking never rebuilds geometry or interrupts a drag.
+  useEffect(() => {
+    engine.current?.setGameTime(props.gameMinutes ?? 360);
+  }, [props.gameMinutes]);
 
   useEffect(() => {
     const instance = engine.current, previous = applied.current;
