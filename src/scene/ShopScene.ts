@@ -142,6 +142,7 @@ export class ShopScene {
   private cityKey = '';
   private building: THREE.Group | null = null;
   private buildingKey = '';
+  private readonly exteriorPreviewPositions = new Map<THREE.Object3D, number>();
   private rooftop: THREE.Group | null = null;
   private rooftopKey = '';
   private landings: THREE.Group | null = null;
@@ -268,8 +269,15 @@ export class ShopScene {
     const previousBuildingBounds = this.state ? JSON.stringify(this.buildingMetrics()) : '';
     const previousFloorY = this.activeFloorY();
     if (this.gesture && (exteriorChanged || levelChanged || getLevelCount(buildingDoc) !== getLevelCount(this.state!.building ?? this.state!.shop))) this.cancelGesture();
-    // Exterior camera navigation never claims furniture/build gestures.
-    if (next.exteriorOnly) next = { ...next, placement: null, selectedId: null, selectedDoor: next.selectedDoor && (next.activeLevel ?? 0) === 0, selectedPartitionId: null, editMode: 'arrange' };
+    // Facade editing shares the arrange/build modes; construction from outside
+    // edits wall height and the entrance without exposing interior floor tools.
+    if (next.exteriorOnly) {
+      const groundLevel = (next.activeLevel ?? 0) === 0;
+      const selected = next.shop.items.find(item => item.id === next.selectedId);
+      next = { ...next, placement: groundLevel && next.placement && isStandingSign(next.placement.kind) ? next.placement : null,
+        selectedId: groundLevel && selected && isStandingSign(selected.kind) ? selected.id : null,
+        selectedDoor: next.selectedDoor && groundLevel, selectedPartitionId: null, buildTool: 'walls' };
+    }
     if (next.rooftopOnly) next = { ...next, editMode: 'arrange', wallPlacement: null, selectedWallId: null, selectedDoor: false, selectedPartitionId: null };
     if (this.gesture && (next.shop !== this.state?.shop || next.editMode !== this.state?.editMode || next.buildTool !== this.state?.buildTool || next.preview !== this.state?.preview || next.placement !== this.state?.placement || next.wallPlacement !== this.state?.wallPlacement || next.showWalls !== this.state?.showWalls || next.showAllWalls !== this.state?.showAllWalls || next.resizeMode !== this.state?.resizeMode || next.selectedId !== this.state?.selectedId || next.selectedWallId !== this.state?.selectedWallId)) this.cancelGesture();
     this.resizeHover = null;
@@ -365,7 +373,7 @@ export class ShopScene {
     }
     this.wallItems.visible = next.showWalls;
     this.wallItems.children.forEach((object) => { object.visible = object.userData.wallItemId !== next.wallPlacement?.id; });
-    const nextBuildingKey = JSON.stringify([buildingDoc, next.showCity]);
+    const nextBuildingKey = this.exteriorContextKey(buildingDoc, activeLevel, next.showCity);
     if (next.exteriorOnly && this.buildingKey !== nextBuildingKey) {
       if (this.building) disposeGroup(this.building);
       this.building = buildBuilding(buildingDoc, { showCity: next.showCity ?? true });
@@ -397,8 +405,12 @@ export class ShopScene {
     if (this.building) this.building.visible = !!next.exteriorOnly;
     if (this.landings) this.landings.visible = !next.exteriorOnly;
     if (this.room) { this.room.visible = !next.rooftopOnly; this.room.position.y = this.wallEditY(); }
-    this.items.visible = !next.exteriorOnly;
-    this.itemPlatforms.visible = !next.exteriorOnly;
+    this.items.visible = !next.exteriorOnly || activeLevel === 0;
+    this.items.children.forEach(object => {
+      const item = shop.items.find(candidate => candidate.id === object.userData.itemId);
+      object.visible = !next.exteriorOnly || (!!item && isStandingSign(item.kind));
+    });
+    this.itemPlatforms.visible = !next.exteriorOnly || activeLevel === 0;
     this.wallItems.visible = next.showWalls && !next.rooftopOnly;
     this.syncExteriorEditor();
     if (firstShop || exteriorChanged || (levelChanged && !next.exteriorOnly) || previousFloorY !== floorY || (next.exteriorOnly && previousBuildingBounds !== JSON.stringify(this.buildingMetrics()))) {
@@ -455,10 +467,38 @@ export class ShopScene {
     this.building.children.forEach(floor => {
       if (typeof floor.userData.level !== 'number') return;
       const editing = floor.userData.level === (this.state!.activeLevel ?? 0);
+      const signs = floor.userData.level === 0 ? getLevelDocument(this.state!.building ?? this.state!.shop, 0).items.filter(item => isStandingSign(item.kind)) : [];
       floor.children.forEach(child => {
         if (child.name === 'exterior-room' || child.userData.wallItemId) child.visible = !editing;
+        if (signs.some(item => item.id === child.userData.itemId) || child.name === 'standing-sign-foundation') child.visible = !editing;
       });
     });
+  }
+
+  private exteriorContextKey(building: ShopDocument, activeLevel: number, showCity?: boolean) {
+    // The active facade/entrance and ground-floor signs have editable copies.
+    // Their hidden building copies can stay cached while ordinary edits commit.
+    // Including the active level guarantees a fresh context before those copies
+    // become visible again when the user selects a different storey.
+    const levels = Array.from({ length: getLevelCount(building) }, (_, level) => {
+      const floor = getLevelDocument(building, level), editing = level === activeLevel;
+      return [floor.name, floor.width, floor.depth, floor.floorColor, floor.wallColor,
+        getWallHeight(floor), getFloorCells(floor), getPartitions(floor), getInteriorDoors(floor),
+        editing ? null : getWallItems(floor), editing ? null : getEntrance(floor),
+        editing && level === 0 ? floor.items.filter(item => !isStandingSign(item.kind)) : floor.items];
+    });
+    return JSON.stringify([activeLevel, levels, getExterior(building), getRoof(building), building.rooftop, showCity]);
+  }
+
+  private previewExteriorHeight(height: number) {
+    if (!this.state?.exteriorOnly || !this.building) return;
+    const level = this.state.activeLevel ?? 0;
+    const delta = height - getWallHeight(this.state.shop);
+    for (const child of this.building.children) {
+      if (!(typeof child.userData.level === 'number' ? child.userData.level > level : child.userData.roofStyle)) continue;
+      if (!this.exteriorPreviewPositions.has(child)) this.exteriorPreviewPositions.set(child, child.position.y);
+      child.position.y = this.exteriorPreviewPositions.get(child)! + delta;
+    }
   }
 
   private isObjectVisible(object: THREE.Object3D) {
@@ -770,6 +810,7 @@ export class ShopScene {
     this.handles.group.visible = getFloorCells(this.gesture?.draft ?? shop).length > 0 && (wallMode || doorMode) && !this.state.preview && !this.state.placement && !this.state.wallPlacement;
     for (const entry of this.handles.entries) {
       entry.object.visible = (wallMode || entry.id === 'door') && (!shop.floorCells || ['walltop', 'door'].includes(entry.id)) && (!['left', 'back', 'walltop', 'door'].includes(entry.id) || this.state.showWalls);
+      if (this.state.exteriorOnly && !['walltop', 'door'].includes(entry.id)) entry.object.visible = false;
       if (entry.id === 'door' && (this.state.activeLevel ?? 0) > 0) entry.object.visible = false;
       if (entry.id === 'door' && this.builtRoom) {
         entry.axis = wallIsHorizontal(getEntranceWall(shop)) ? 'x' : 'z';
@@ -781,6 +822,8 @@ export class ShopScene {
         const back = floorOutline(getFloorCells(shop)).filter((edge) => edge.side === 'back').sort((a, b) => a.z1 - b.z1 || a.x1 - b.x1)[0];
         if (back) entry.object.position.set((back.x1 + back.x2) / 2 - shop.width / 2, dimensions.wallHeight + 0.14, back.z1 - shop.depth / 2);
       }
+      // Door handles above already use the entrance's world position.
+      if (entry.id !== 'door') entry.object.position.y += this.wallEditY();
     }
     this.renderDirty = true;
   }
@@ -1001,7 +1044,7 @@ export class ShopScene {
 
   private floorPoint(event: PointerEvent) {
     this.prepareRay(event);
-    return this.raycaster.ray.intersectPlane(this.floorPlane, new THREE.Vector3());
+    return this.wallEditRay().intersectPlane(this.floorPlane, new THREE.Vector3());
   }
 
   private setInteraction(text: string | null) {
@@ -1072,6 +1115,7 @@ export class ShopScene {
     this.transient = dimensions;
     this.builtRoom.previewDimensions(dimensions.width, dimensions.depth, dimensions.wallHeight, dimensions.entrancePosition);
     if (this.state.exteriorOnly) applyExteriorWallMaterial(this.builtRoom.walls, getExterior(this.state.building ?? this.state.shop));
+    if (this.gesture?.kind === 'height') this.previewExteriorHeight(dimensions.wallHeight);
     this.state.shop.items.forEach((item) => {
       const object = this.items.children.find((candidate) => candidate.userData.itemId === item.id);
       if (!object) return;
@@ -1173,7 +1217,7 @@ export class ShopScene {
     }
     const dimensions = { ...drag.dimensions };
     if (drag.kind === 'height') {
-      const origin = new THREE.Vector3(0, drag.dimensions.wallHeight, -drag.base.depth / 2);
+      const origin = new THREE.Vector3(0, this.wallEditY() + drag.dimensions.wallHeight, -drag.base.depth / 2);
       const a = this.project(origin);
       const b = this.project(origin.clone().add(new THREE.Vector3(0, 1, 0)));
       const axis = new THREE.Vector2(b.clientX - a.clientX, b.clientY - a.clientY);
@@ -1202,6 +1246,8 @@ export class ShopScene {
 
   private restorePreview() {
     if (!this.state) return;
+    this.exteriorPreviewPositions.forEach((y, object) => { object.position.y = y; });
+    this.exteriorPreviewPositions.clear();
     this.resizeHover = null;
     const base = this.dimensions();
     this.builtRoom?.previewDimensions(base.width, base.depth, base.wallHeight, base.entrancePosition);
@@ -1219,7 +1265,7 @@ export class ShopScene {
       const item = getWallItems(this.state!.shop).find((entry) => entry.id === object.userData.wallItemId);
       if (item) this.positionWallItem(object, item);
     });
-    if (this.grid) { this.grid.scale.set(1, 1, 1); this.grid.visible = this.state.showGrid && !this.state.preview; }
+    if (this.grid) { this.grid.scale.set(1, 1, 1); this.grid.visible = this.state.showGrid && !this.state.preview && !this.state.exteriorOnly; }
     if (this.itemDragFrame) disposeGroup(this.itemDragFrame);
     this.itemDragFrame = null;
     this.itemDragFrameValid = null;
@@ -1343,21 +1389,27 @@ export class ShopScene {
   }
 
   private pickAt(event: PointerEvent): string | null {
-    if (this.state?.exteriorOnly) return null;
+    if (this.state?.exteriorOnly && (this.state.activeLevel ?? 0) !== 0) return null;
     this.prepareRay(event);
-    const intersections = this.raycaster.intersectObjects(this.items.children, true);
+    const intersections = this.raycaster.intersectObjects(this.state?.exteriorOnly
+      ? [...this.items.children, this.wallItems, ...(this.room ? [this.room] : []), ...(this.building ? [this.building] : [])]
+      : this.items.children, true);
     for (const intersection of intersections) {
+      if (!this.isObjectVisible(intersection.object)) continue;
       let object: THREE.Object3D | null = intersection.object;
       while (object && object !== this.items) {
-        if (typeof object.userData.itemId === 'string') return object.userData.itemId;
+        if (typeof object.userData.itemId === 'string' && (!this.state?.exteriorOnly || object.parent === this.items)) return object.userData.itemId;
         object = object.parent;
       }
+      // The facade and other storeys must block signs behind them.
+      if (this.state?.exteriorOnly && intersection.object instanceof THREE.Mesh) return null;
     }
     // Narrow sign legs/edges remain usable on a phone without enlarging their visible mesh.
     if (this.state) {
       let nearest: { id: string; distance: number } | null = null;
       const minimum = event.pointerType === 'touch' ? 44 : 28;
       for (const object of this.items.children) {
+        if (!this.isObjectVisible(object)) continue;
         const item = this.state.shop.items.find((entry) => entry.id === object.userData.itemId);
         if (!item || !isStandingSign(item.kind)) continue;
         const box = new THREE.Box3().setFromObject(object);
@@ -1510,7 +1562,7 @@ export class ShopScene {
     }
     const wallId = this.pickWallAt(event);
     const wallItem = wallId ? getWallItems(this.state.shop).find((item) => item.id === wallId) : undefined;
-    if (wallItem && !this.pickHandle(event)) {
+    if (wallItem && (!this.state.exteriorOnly || this.state.editMode !== 'build') && !this.pickHandle(event)) {
       this.beginGesture(event, 'wall-item', undefined, undefined, wallItem);
       return;
     }
@@ -1556,7 +1608,11 @@ export class ShopScene {
       this.renderer.domElement.style.cursor = 'crosshair';
       return;
     }
-    if (this.state.exteriorOnly) { this.setHover(null); this.renderer.domElement.style.cursor = this.pickHandle(event) === 'door' || this.roomTarget(event) === 'door' || this.pickWallAt(event) ? 'move' : 'grab'; return; }
+    if (this.state.exteriorOnly) {
+      this.setHover(this.state.placement ? this.cellAt(event) : null);
+      this.renderer.domElement.style.cursor = this.state.placement ? 'crosshair' : this.pickHandle(event) || this.roomTarget(event) === 'door' || (this.state.editMode !== 'build' && (this.pickWallAt(event) || this.pickAt(event))) ? 'move' : 'grab';
+      return;
+    }
     const painting = this.state.editMode === 'build' && ['add', 'erase', 'partition'].includes(this.state.buildTool ?? 'add') && !this.state.placement;
     const cell = this.cellAt(event, painting);
     this.setHover(cell);
@@ -1597,6 +1653,7 @@ export class ShopScene {
     } else if (this.roomTarget(event) === 'door') {
       if (!this.state.preview) this.callbacks.onSelectDoor();
     } else if (!this.state.preview) {
+      if (this.state.exteriorOnly && this.state.editMode === 'build') return;
       const partitionId = this.pickPartitionAt(event);
       if (partitionId) { this.callbacks.onSelectPartition?.(partitionId); return; }
       const wallId = this.pickWallAt(event);
@@ -1795,6 +1852,9 @@ export class ShopScene {
     data.activeLevel = String(this.state.activeLevel ?? 0);
     data.levelCount = String(getLevelCount(this.state.building ?? this.state.shop));
     data.exteriorOnly = String(!!this.state.exteriorOnly);
+    data.exteriorContextId = this.state.exteriorOnly ? this.building?.uuid ?? '' : '';
+    data.editMode = this.state.editMode ?? 'arrange';
+    data.exteriorStoreys = JSON.stringify(this.state.exteriorOnly ? this.building?.children.map(object => ({ name: object.name, level: object.userData.level, y: object.position.y })) : []);
     data.rooftopOnly = String(!!this.state.rooftopOnly);
     data.rooftopStairAccess = getRoof(this.state.building ?? this.state.shop).stairAccess ?? 'open';
     let enclosures = 0, guardrails = 0;
@@ -1905,7 +1965,7 @@ export class ShopScene {
     const placementKind = this.state.placement?.kind ?? this.state.shop.items.find((item) => item.id === this.state?.selectedId)?.kind;
     data.placementTargets = JSON.stringify(placementKind && isStandingSign(placementKind) ? groundTargets : groundTargets.filter((cell) => !cell.exterior));
     data.handles = JSON.stringify(this.handles.group.visible ? this.handles.entries.filter((entry) => entry.object.visible).map(({ id, axis, object }) => ({ id, axis, ...this.project(object.position), worldX: object.position.x, worldY: object.position.y, worldZ: object.position.z })) : []);
-    data.itemCenters = JSON.stringify(this.items.children.map((object) => {
+    data.itemCenters = JSON.stringify(this.items.children.filter(object => this.isObjectVisible(object)).map((object) => {
       const center = new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3());
       return { id: object.userData.itemId as string, worldX: object.position.x, worldY: object.position.y, worldZ: object.position.z, ...this.project(center) };
     }));

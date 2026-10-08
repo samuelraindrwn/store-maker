@@ -6,7 +6,6 @@ const KEY = 'nemu.store-maker.v1';
 const canvas = (page: Page) => page.locator('canvas[data-renderer="webgl"]');
 const button = (page: Page, name: string) => page.getByRole('button', { name, exact: true });
 const toolbar = (page: Page) => page.locator('.wall-mount-toolbar');
-const sideLabel: Record<WallSide, string> = { front: 'Depan', right: 'Kanan', back: 'Belakang', left: 'Kiri' };
 const fixture = (): ShopDocument => ({ ...createEmptyShop(), name: 'Jendela Empat Sisi', width: 8, depth: 7 });
 const saved = (page: Page): Promise<ShopDocument> => page.evaluate(key => JSON.parse(localStorage.getItem(key)!), KEY);
 const data = async <T = unknown>(page: Page, key: string): Promise<T> => JSON.parse(await canvas(page).getAttribute(`data-${key}`) || 'null');
@@ -14,6 +13,7 @@ const data = async <T = unknown>(page: Page, key: string): Promise<T> => JSON.pa
 async function ready(page: Page) {
   await expect(canvas(page)).toHaveAttribute('data-ready', 'true');
   await expect(page.locator('.shop-canvas')).toHaveAttribute('aria-busy', 'false');
+  await expect(toolbar(page)).toHaveCount(0);
 }
 
 async function open(page: Page, info: TestInfo) {
@@ -30,10 +30,10 @@ async function open(page: Page, info: TestInfo) {
 }
 
 async function chooseSide(page: Page, side: WallSide) {
-  const choice = toolbar(page).getByRole('button', { name: `Pasang di sisi ${sideLabel[side]}`, exact: true });
-  await choice.click();
-  await expect(choice).toHaveAttribute('aria-pressed', 'true');
   const line = side === 'front' ? 7 : side === 'right' ? 8 : 0;
+  const length = side === 'front' || side === 'back' ? 8 : 7;
+  await expect(toolbar(page)).toHaveCount(0);
+  await page.getByLabel('Dinding aksesori', { exact: true }).selectOption(`${side}:${line}:0:${length}`);
   await expect.poll(() => data(page, 'wall-placement-mount')).toEqual({ wall: side, line });
   await expect.poll(() => data(page, 'wall-mount-guide')).toMatchObject({ wall: side, line });
 }
@@ -72,7 +72,7 @@ async function previewAtOtherWall(page: Page, info: TestInfo, side: WallSide) {
   } else await page.mouse.move(point.x, point.y);
 }
 
-test('front and right side buttons place new windows directly on the canvas by mouse or touch', async ({ page }, info) => {
+test('front and right inspector choices place new windows on the canvas without a floating side toolbar', async ({ page }, info) => {
   test.setTimeout(100_000);
   const errors = await open(page, info);
   await button(page, 'Dinding').click();
@@ -130,13 +130,12 @@ test('explicit front and right choices stay locked across hover and support manu
   expect(errors).toEqual([]);
 });
 
-test('automatic placement still reaches back and left walls, and all side controls fit a 320px viewport', async ({ page }, info) => {
+test('automatic placement reaches back and left walls, and the inspector fits a 320px viewport', async ({ page }, info) => {
   test.setTimeout(100_000);
   const errors = await open(page, info);
   await button(page, 'Dinding').click();
   await page.getByTestId('catalog-window').click();
-  await chooseSide(page, 'front');
-  await toolbar(page).getByRole('button', { name: 'Pilih sisi otomatis', exact: true }).click();
+  await expect(toolbar(page)).toHaveCount(0);
   await expect.poll(() => data(page, 'wall-placement-mount')).toBeNull();
   await clickWall(page, info, 'back');
   await expect.poll(async () => (await saved(page)).wallItems?.[0]).toMatchObject({ wall: 'back', offset: 2.5, height: 1.5 });
@@ -145,8 +144,8 @@ test('automatic placement still reaches back and left walls, and all side contro
   await expect.poll(async () => (await saved(page)).wallItems?.[1]).toMatchObject({ wall: 'left', offset: 3.5, height: 1.5 });
   await page.setViewportSize({ width: 320, height: 844 });
   await page.getByTestId('catalog-window').click();
-  for (const label of Object.values(sideLabel)) {
-    const control = toolbar(page).getByRole('button', { name: `Pasang di sisi ${label}`, exact: true });
+  for (const label of ['Dinding aksesori', 'Posisi aksesori di dinding', 'Ketinggian aksesori']) {
+    const control = page.getByLabel(label, { exact: true });
     await expect(control).toBeVisible();
     const bounds = await control.boundingBox();
     expect(bounds).not.toBeNull();
@@ -154,7 +153,8 @@ test('automatic placement still reaches back and left walls, and all side contro
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320);
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
-  await toolbar(page).screenshot({ path: info.outputPath('window-side-controls-320px.png') });
+  await expect(toolbar(page)).toHaveCount(0);
+  await page.getByLabel('Dinding aksesori', { exact: true }).screenshot({ path: info.outputPath('window-side-inspector-320px.png') });
   expect(errors).toEqual([]);
 });
 

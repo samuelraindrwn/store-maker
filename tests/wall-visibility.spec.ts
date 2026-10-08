@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { createEmptyShop, type ShopDocument } from '../src/model';
+import { createEmptyShop, createInitialShop, setRoof, type ShopDocument } from '../src/model';
 
 test.use({ reducedMotion: 'reduce' });
 const KEY = 'nemu.store-maker.v1';
@@ -55,7 +55,7 @@ test('all-wall and hide-wall controls preserve the design, camera and renderer',
 
 test('all walls remain enabled after rebuilding a room and switching floors or views', async ({ page }, info) => {
   test.setTimeout(90_000);
-  const errors = await open(page, info);
+  const errors = await open(page, info, setRoof(createInitialShop(), { style: 'rooftop' }));
   await button(page, 'Tampilkan seluruh tembok').click();
   await button(page, 'Bangun ruangan').click();
   await button(page, 'Warna dinding 2').click();
@@ -68,7 +68,8 @@ test('all walls remain enabled after rebuilding a room and switching floors or v
   await button(page, 'Eksterior').click();
   await expect(button(page, 'Tampilkan seluruh tembok')).toBeDisabled();
   await expect(button(page, 'Tampilkan dinding')).toBeDisabled();
-  await expect(page.getByTestId('scene-toolbar')).toHaveCount(0);
+  await expect(page.getByTestId('scene-toolbar')).toBeVisible();
+  await expect(button(page, 'Atur barang')).toHaveAttribute('aria-pressed', 'true');
   await button(page, 'Interior').click();
   await expect.poll(() => walls(page)).toEqual(full);
   expect(await saved(page)).toEqual(design);

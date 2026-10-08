@@ -123,9 +123,11 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
     const instance = engine.current, previous = applied.current;
     if (!instance || !previous) return;
     const changingView = props.exteriorOnly !== previous.exteriorOnly || props.rooftopOnly !== previous.rooftopOnly || props.activeLevel !== previous.activeLevel
-      || props.revision !== previous.revision || (props.exteriorOnly && props.building !== previous.building);
+      || props.revision !== previous.revision;
     if (!changingView) {
       applied.current = props;
+      // Moving or editing objects keeps the current view interactive. Document
+      // identity changes on every commit and must never trigger a loading veil.
       // A quick reversal may cancel a queued switch and return to this view.
       // Its next frame must also release any loading veil left by that switch.
       awaitingFrame.current = true;
