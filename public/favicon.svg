@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Store Maker">
+  <title>Store Maker</title>
+  <rect width="64" height="64" rx="16" fill="#704BFD"/>
+  <path d="M14 25 32 15 50 25 32 35Z" fill="#FFFFFF"/>
+  <path d="M14 25 32 35 32 52 14 42Z" fill="#CDBEFF"/>
+  <path d="M32 35 50 25 50 42 32 52Z" fill="#F2EDFF"/>
+  <path d="M19 32 26 36 26 42 19 38Z" fill="#704BFD"/>
+  <path d="M39 38 45 34.5 45 45 39 48.5Z" fill="#704BFD"/>
+</svg>
