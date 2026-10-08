@@ -17,7 +17,7 @@ describe('completely blank shop documents', () => {
     expect(getFloorCells(createEmptyShop())).toHaveLength(42)
     expect(createEmptyShop()).not.toHaveProperty('floorCells')
     expect(createInitialShop().items).toHaveLength(15)
-    expect(createInitialShop().wallItems).toHaveLength(2)
+    expect(createInitialShop().wallItems).toHaveLength(4)
     const other = createBlankShop()
     expect(other.items).not.toBe(blank.items)
     expect(other.wallItems).not.toBe(blank.wallItems)

@@ -22,6 +22,7 @@ export type ShopCanvasProps = {
   selectedDoor: boolean;
   resizeMode?: boolean;
   wallPlacement: WallItem | null;
+  wallPlacementMount?: Pick<WallItem, 'wall' | 'line'> | null;
   showGrid: boolean;
   showWalls: boolean;
   preview: boolean;
@@ -142,7 +143,7 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
       }
     }); });
     return () => { cancelAnimationFrame(firstFrame); cancelAnimationFrame(secondFrame); };
-  }, [props.shop, props.building, props.activeLevel, props.exteriorOnly, props.revision, props.selectedId, props.placement, props.selectedWallId, props.selectedPartitionId, props.selectedDoor, props.resizeMode, props.wallPlacement, props.showGrid, props.showWalls, props.preview, props.editMode, props.buildTool, props.showCity, props.nightMode]);
+  }, [props.shop, props.building, props.activeLevel, props.exteriorOnly, props.revision, props.selectedId, props.placement, props.selectedWallId, props.selectedPartitionId, props.selectedDoor, props.resizeMode, props.wallPlacement, props.wallPlacementMount, props.showGrid, props.showWalls, props.preview, props.editMode, props.buildTool, props.showCity, props.nightMode]);
 
   return (
     <div className="shop-canvas" aria-busy={loading} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: '#e8e3ed' }}>

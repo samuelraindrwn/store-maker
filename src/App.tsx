@@ -6,12 +6,13 @@ import WallArt from './components/WallArt';
 import AmbienceControl from './components/AmbienceControl';
 import ExteriorSettings from './components/ExteriorSettings';
 import PartitionPanel from './components/PartitionPanel';
+import WallMountPicker, { WALL_SIDE_LABELS, type WallMount } from './components/WallMountPicker';
 import { getPartitions, getEntranceWall, removePartition } from './model';
 import { getLevelCount, getLevelDocument, replaceLevelDocument, setLevelCount, getRoof } from './model';
 import { CATALOG, FOOD_ITEM_KINDS, FOOD_PRODUCTS, canPlace, createBlankShop, createInitialShop, createItem, getAllowedStocks, getEntrance, getFloorBounds, getFloorCells, getItemSize, getItemFootprint, getItemPlacementBounds, getWallHeight, isStandingSign, parseShop, placeItem, removeItem, renameShop, setEntrance, setWallHeight, updateItem, upgradeShop } from './model';
 import type { ItemKind, ProductKind, Rotation, ShopDocument, ShopItem } from './model';
 import { WALL_CATALOG, WINDOW_STYLES, getWindowStyle, getWallItems, getWallItemSize, getWallRuns, createWallItem, canPlaceWallItem, findWallPlacement, placeWallItem, updateWallItem, removeWallItem } from './model';
-import type { WallItem, WallItemKind, WindowStyle } from './model';
+import type { WallItem, WallItemKind, WallSide, WindowStyle } from './model';
 
 const STORAGE_KEY = 'nemu.store-maker.v1';
 const NIGHT_MODE_KEY = 'nemu.store-maker.night-mode';
@@ -66,6 +67,7 @@ export default function App() {
   const [selectedPartitionId, setSelectedPartitionId] = useState<string | null>(null);
   const [resizeMode, setResizeMode] = useState(false);
   const [wallPlacement, setWallPlacement] = useState<WallItem | null>(null);
+  const [wallPlacementMount, setWallPlacementMount] = useState<WallMount | null>(null);
   const [tab, setTab] = useState<'furniture' | 'room'>(() => getFloorCells(shop).length ? 'furniture' : 'room');
   const [filter, setFilter] = useState<'all' | 'display' | 'decor' | 'sign' | 'wall' | 'food' | 'utility'>('all');
   const [showGrid, setShowGrid] = useState(() => getFloorCells(shop).length === 0);
@@ -121,6 +123,7 @@ export default function App() {
   }, [building]);
   useEffect(() => { if (selectedId && !shop.items.some((item) => item.id === selectedId)) setSelectedId(null); }, [shop.items, selectedId]);
   useEffect(() => { if (selectedWallId && !getWallItems(shop).some((item) => item.id === selectedWallId)) setSelectedWallId(null); }, [shop, selectedWallId]);
+  useEffect(() => { if (!wallPlacement) setWallPlacementMount(null); }, [wallPlacement]);
   useEffect(() => { if (selectedPartitionId && !getPartitions(shop).some(wall => wall.id === selectedPartitionId)) setSelectedPartitionId(null); }, [shop, selectedPartitionId]);
   useEffect(() => { setResizeMode(false); }, [selectedId, selectedWallId, selectedDoor, selectedPartitionId, placement, wallPlacement, preview, editMode]);
 
@@ -274,6 +277,7 @@ export default function App() {
     announce('Seret garis petak untuk membangun tembok dalam.');
   };
   const startWallPlacement = (kind: WallItemKind, clone?: WallItem) => {
+    setWallPlacementMount(null);
     setSelectedPartitionId(null);
     if (!getFloorCells(shop).length) { changeMode('build'); setBuildTool('add'); setShowGrid(true); announce('Gambar lantainya dulu. Dinding akan mengikuti bentuk lantai.'); return; }
     const item = clone ? { ...clone, id: createWallItem(kind).id } : createWallItem(kind, shop.name);
@@ -303,6 +307,21 @@ export default function App() {
     if (!candidate) return;
     setWallPlacement((item) => item && (item.wall !== candidate.wall || item.line !== candidate.line || item.offset !== candidate.offset || item.height !== candidate.height) ? { ...item, wall: candidate.wall, line: candidate.line, offset: candidate.offset, height: candidate.height } : item);
   }, []);
+  const chooseWallMount = (candidate: WallItem | null) => {
+    if (!candidate) { announce('Belum ada posisi kosong di dinding itu.'); return; }
+    setWallPlacement(candidate);
+    setWallPlacementMount({ wall: candidate.wall, line: candidate.line });
+  };
+  const chooseWallSide = (wall: WallSide) => {
+    if (!wallPlacement) return;
+    const size = getWallItemSize(wallPlacement), height = getWallHeight(shop);
+    const run = getWallRuns(shop).find(run => run.wall === wall && run.end - run.start >= size.width);
+    if (!run) { chooseWallMount(null); return; }
+    const candidate = findWallPlacement(shop, { ...wallPlacement, wall, line: run.line,
+      offset: Math.max(run.start + size.width / 2, Math.min(run.end - size.width / 2, wallPlacement.offset)),
+      height: Math.max(size.height / 2, Math.min(height - size.height / 2, wallPlacement.height)) }, { wall });
+    chooseWallMount(candidate?.wall === wall ? candidate : null);
+  };
   const exportDesign = () => {
     const url = URL.createObjectURL(new Blob([JSON.stringify(building, null, 2)], { type: 'application/json' }));
     downloadFile(url, `${building.name.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() || 'tokoku'}.store-maker.json`);
@@ -346,7 +365,7 @@ export default function App() {
         <div className="shop-heading"><span className="shop-heading-icon"><Store size={23} /></span><div><label className="eyebrow" htmlFor="shop-name">TOKO KECIL PUNYAMU</label><input id="shop-name" aria-label="Nama toko" maxLength={80} value={building.name} onChange={(e) => { const name = e.target.value; commitBuilding(doc => renameShop(doc, name)); }} onBlur={() => commitBuilding(doc => doc.name.trim() ? doc : renameShop(doc, 'Toko Kecilku'))} /></div><span className={`save-status ${saved ? '' : 'save-error'}`} title={saved ? 'Disimpan di browser ini' : 'Penyimpanan browser tidak tersedia. Unduh file desain.'}>{saved ? <CheckCheck size={15} /> : <Save size={15} />}<span>{saved ? 'Tersimpan' : 'Unduh cadangan'}</span></span></div>
         <div className="workspace-actions">
           {!preview && <div className="history-actions"><button className="icon-button" title="Urungkan (Ctrl Z)" aria-label="Urungkan" disabled={!history.past.length} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" title="Ulangi (Ctrl Shift Z)" aria-label="Ulangi" disabled={!history.future.length} onClick={redo}><Redo2 size={18} /></button></div>}
-          <div className="file-menu-wrap"><button className="button button-light file-trigger" aria-label="Menu file desain" aria-expanded={fileMenu} onClick={() => setFileMenu(!fileMenu)}><ArrowDownToLine size={16} /><span>Desain</span><ChevronDown size={13} /></button>{fileMenu && <><button className="menu-dismiss" aria-label="Tutup menu desain" onClick={() => setFileMenu(false)} /><div className="file-menu"><button onClick={exportDesign}><ArrowDownToLine size={16} />Simpan file desain</button><button onClick={() => { importer.current?.click(); setFileMenu(false); }}><Upload size={16} />Buka file desain</button><button onClick={takePhoto}><Camera size={16} />Unduh foto toko</button></div></>}</div>
+          <div className="file-menu-wrap"><button className="button button-light file-trigger" aria-label="Menu file desain" aria-expanded={fileMenu} onClick={() => setFileMenu(!fileMenu)}><ArrowDownToLine size={16} /><span>Desain</span><ChevronDown size={13} /></button>{fileMenu && <><button className="menu-dismiss" aria-label="Tutup menu desain" onClick={() => setFileMenu(false)} /><div className="file-menu"><button onClick={exportDesign}><ArrowDownToLine size={16} />Simpan file desain</button><button onClick={() => { importer.current?.click(); setFileMenu(false); }}><Upload size={16} />Buka file desain</button><button onClick={takePhoto}><Camera size={16} />Unduh foto toko</button><button onClick={() => restartShop(false)}><RotateCcw size={16} />Gunakan toko contoh</button></div></>}</div>
           <input ref={importer} aria-label="Buka file desain" className="visually-hidden" type="file" accept=".json,.store-maker.json,.nemu.json,application/json" onChange={(e) => void importDesign(e.target.files?.[0])} />
           <button className={`button ${preview ? 'button-dark' : 'button-purple'}`} onClick={() => { setPreview(!preview); setPlacement(null); setSelectedId(null); setWallPlacement(null); setSelectedWallId(null); setSelectedDoor(false); }} aria-pressed={preview}>{preview ? <ArrowLeft size={16} /> : <Eye size={17} />}<span>{preview ? 'Kembali ngatur' : 'Lihat tokoku'}</span></button>
         </div>
@@ -401,11 +420,12 @@ export default function App() {
             {!preview && editMode === 'build' && !placement && !wallPlacement && <div className="build-tool-switch" aria-label="Alat bentuk ruangan"><button className={buildTool === 'add' ? 'active' : ''} aria-label="Tambah lantai" aria-pressed={buildTool === 'add'} onClick={() => { clearSelection(); setBuildTool('add'); }}><Plus size={14} />Lantai</button><button className={buildTool === 'erase' ? 'active' : ''} aria-label="Hapus lantai" aria-pressed={buildTool === 'erase'} onClick={() => { clearSelection(); setBuildTool('erase'); }}><Eraser size={14} />Hapus</button><button className={buildTool === 'walls' ? 'active' : ''} aria-label="Atur dinding dan pintu" aria-pressed={buildTool === 'walls'} onClick={() => { clearSelection(); setBuildTool('walls'); }}><DoorOpen size={14} />{activeLevel === 0 ? 'Dinding & pintu' : 'Dinding'}</button><button className={buildTool === 'partition' ? 'active' : ''} aria-label="Tembok dalam" aria-pressed={buildTool === 'partition'} onClick={drawPartition}><Grid2X2 size={14} />Sekat</button></div>}
             {!preview && !placement && !wallPlacement && <div className="gesture-hint" data-testid="gesture-hint"><span className="tiny-spark">✦</span>{resizeMode ? 'Seret ujungnya atau klik petak tujuan.' : editMode === 'build' ? buildTool === 'partition' ? 'Seret garis petak untuk membuat tembok. Klik tembok untuk memasang pintu.' : buildTool === 'walls' ? activeLevel === 0 ? 'Tarik tinggi dinding atau geser pintu masuk.' : 'Tarik pegangan untuk mengatur tinggi dinding.' : buildTool === 'erase' ? 'Sapu petak untuk menghapus. Barang tetap aman.' : 'Klik atau sapu petak transparan untuk membangun.' : selectedDoor ? 'Seret pintu untuk pindah. Buka atau tutup lewat panel.' : 'Seret barang atau pintu untuk memindahkannya.'}</div>}
             {placement && <div className="placement-banner"><span className="placement-indicator" /><div><strong>{moving ? 'Pindahkan' : 'Letakkan'} {CATALOG.find((entry) => entry.kind === placement.kind)?.name}</strong><span>{isStandingSign(placement.kind) ? 'Klik lantai atau trotoar depan toko.' : 'Klik petak kosong di lantai.'}</span></div><button className="icon-button" aria-label="Putar barang" title="Putar (R)" onClick={rotate}><RotateCw size={18} /></button><button className="icon-button" aria-label="Batalkan penempatan" title="Batal (Esc)" onClick={() => setPlacement(null)}><X size={18} /></button></div>}
-            {wallPlacement && <div className="placement-banner wall-placement-banner"><span className="placement-indicator" /><div><strong>{movingWall ? 'Pindahkan' : 'Pasang'} {WALL_CATALOG.find((entry) => entry.kind === wallPlacement.kind)?.name}</strong><span>Klik dinding. Hijau berarti posisinya pas.</span></div><button className="icon-button" aria-label="Batalkan penempatan aksesori" title="Batal (Esc)" onClick={() => setWallPlacement(null)}><X size={18} /></button></div>}
+            {wallPlacement && <div className="placement-banner wall-placement-banner"><span className="placement-indicator" /><div><strong>{movingWall ? 'Pindahkan' : 'Pasang'} {WALL_CATALOG.find((entry) => entry.kind === wallPlacement.kind)?.name}</strong><span>{wallPlacementMount ? `Pasang pada sisi ${WALL_SIDE_LABELS[wallPlacementMount.wall].toLowerCase()}. Hijau berarti posisinya pas.` : "Pilih sisi di atas kanvas, lalu klik dinding."}</span></div><button className="icon-button" aria-label="Batalkan penempatan aksesori" title="Batal (Esc)" onClick={() => setWallPlacement(null)}><X size={18} /></button></div>}
           </div>}
           <section className={`scene-panel ${placement || wallPlacement ? 'is-placing' : ''} ${editMode === 'build' && !preview ? 'is-building' : ''} ${showCity ? 'with-city' : ''} ${nightMode ? 'is-night' : ''}`} data-testid="scene" aria-label="Toko 3D interaktif">
             <div className="scene-topline"><span className="scene-badge">{nightMode ? <Moon size={12} /> : <span className="live-dot" />}{exteriorOnly ? 'EKSTERIOR TOKOMU' : nightMode ? 'MALAM DI TOKOMU' : preview ? 'TOKOMU, VERSI KAMU' : 'RUANG KREATIF'}</span><span className="scene-dimensions">{exteriorOnly ? levelCount : floorCount}<span>{exteriorOnly ? ' LANTAI' : ` PETAK / LT ${activeLevel + 1}`}</span></span></div>
-            <ShopCanvas ref={scene} revision={sceneRevision} shop={shop} building={building} activeLevel={activeLevel} exteriorOnly={exteriorOnly} selectedId={selectedId} placement={placement} selectedWallId={selectedWallId} selectedDoor={selectedDoor} wallPlacement={wallPlacement} resizeMode={resizeMode} showGrid={showGrid && !preview} showWalls={showWalls} showCity={showCity} nightMode={nightMode} editMode={editMode} buildTool={buildTool} preview={preview} onSelect={selectItem} onSelectWall={selectWallItem} onSelectDoor={selectDoor} selectedPartitionId={selectedPartitionId} onSelectPartition={selectPartition} onCell={placeAt} onHover={hoverCell} onWallPlace={placeWallAt} onWallHover={hoverWall} onChange={commitGesture} onInteraction={setInteraction} />
+            {wallPlacement && !preview && !exteriorOnly && <WallMountPicker shop={shop} item={wallPlacement} mount={wallPlacementMount} onChoose={chooseWallSide} onAuto={() => setWallPlacementMount(null)} />}
+            <ShopCanvas ref={scene} revision={sceneRevision} shop={shop} building={building} activeLevel={activeLevel} exteriorOnly={exteriorOnly} selectedId={selectedId} placement={placement} selectedWallId={selectedWallId} selectedDoor={selectedDoor} wallPlacement={wallPlacement} wallPlacementMount={wallPlacementMount} resizeMode={resizeMode} showGrid={showGrid && !preview} showWalls={showWalls} showCity={showCity} nightMode={nightMode} editMode={editMode} buildTool={buildTool} preview={preview} onSelect={selectItem} onSelectWall={selectWallItem} onSelectDoor={selectDoor} selectedPartitionId={selectedPartitionId} onSelectPartition={selectPartition} onCell={placeAt} onHover={hoverCell} onWallPlace={placeWallAt} onWallHover={hoverWall} onChange={commitGesture} onInteraction={setInteraction} />
             {interaction && !preview && <div className="interaction-hud" aria-live="off"><Move size={16} /><span>{interaction}</span><kbd>Esc</kbd></div>}
             {preview && <div className="preview-label"><span className="eyebrow">DIBUAT DENGAN SEDIKIT IMAJINASI</span><h2>{building.name || 'Toko Kecilku'}</h2><div className="preview-actions"><button className="button button-dark" onClick={takePhoto}><Camera size={16} />Ambil foto toko</button>{!exteriorOnly && activeLevel === 0 && floorCount > 0 && <button className="button button-light" aria-label={entrance.open ? 'Tutup pintu masuk' : 'Buka pintu masuk'} onClick={() => commit(setEntrance(shop, { open: !entrance.open }))}><DoorOpen size={16} />{entrance.open ? 'Tutup pintu' : 'Buka pintu'}</button>}</div></div>}
             <div className="scene-controls">
@@ -453,7 +473,7 @@ export default function App() {
           </> : selectedWall && selectedWallEntry && !wallPlacement ? <>
             <div className="inspector-head"><span className="eyebrow">SENTUHAN DI DINDING</span><button className="icon-button" aria-label="Tutup detail aksesori" onClick={() => setSelectedWallId(null)}><X size={16} /></button></div>
             <div className="selected-art"><WallArt kind={selectedWall.kind} color={selectedWall.color} windowStyle={getWindowStyle(selectedWall)} /></div><h2>{selectedWallEntry.name}</h2><p className="muted small">{selectedWallEntry.description}</p>
-            <div className="object-actions"><button aria-label="Pindahkan aksesori" onClick={() => { setWallPlacement({ ...selectedWall }); setShowWalls(true); }}><Move size={17} /><span>Pindah</span></button><button aria-label="Duplikat aksesori" onClick={() => startWallPlacement(selectedWall.kind, selectedWall)}><Copy size={17} /><span>Salin</span></button><button aria-label="Hapus aksesori" className="delete-button" onClick={deleteSelected}><Trash2 size={17} /><span>Hapus</span></button></div>
+            <div className="object-actions"><button aria-label="Pindahkan aksesori" onClick={() => { chooseWallMount({ ...selectedWall }); setShowWalls(true); }}><Move size={17} /><span>Pindah</span></button><button aria-label="Duplikat aksesori" onClick={() => startWallPlacement(selectedWall.kind, selectedWall)}><Copy size={17} /><span>Salin</span></button><button aria-label="Hapus aksesori" className="delete-button" onClick={deleteSelected}><Trash2 size={17} /><span>Hapus</span></button></div>
             {selectedWallSize && <><p className="object-size-summary" aria-label="Ukuran aksesori">{selectedWallSize.width.toLocaleString('id-ID')} × {selectedWallSize.height.toLocaleString('id-ID')} m</p><ResizeControls key={selectedWall.id} active={resizeMode} onToggle={() => setResizeMode(!resizeMode)} wall width={selectedWallSize.width} depthOrHeight={selectedWallSize.height} onWidth={(width) => updateSelectedWall({ width })} onDepthOrHeight={(sizeHeight) => updateSelectedWall({ sizeHeight })} /></>}
             <label className="field-label spaced">PILIH WARNA</label><ColorPicker colors={COLORS} value={selectedWall.color} label="aksesori" onChange={(color) => updateSelectedWall({ color })} />
             {selectedWall.kind === 'window' && <WindowStylePicker color={selectedWall.color} value={getWindowStyle(selectedWall)} onChange={(windowStyle) => updateSelectedWall({ windowStyle })} />}
@@ -465,7 +485,7 @@ export default function App() {
             <span className="eyebrow">SATU SENTUHAN BARU</span><div className="selected-art"><WallArt kind={wallPlacement.kind} color={wallPlacement.color} windowStyle={getWindowStyle(wallPlacement)} /></div><h2>Carikan dindingnya.</h2><p className="muted">Pilih sisi depan, kanan, belakang, atau kiri. Bayangan hijau berarti aksesori bisa dipasang.</p>
             {wallPlacement.kind === 'window' && <WindowStylePicker color={wallPlacement.color} value={getWindowStyle(wallPlacement)} onChange={(windowStyle) => setWallPlacement({ ...wallPlacement, windowStyle })} />}
             {wallPlacementSize && <p className="object-size-summary" aria-label="Ukuran aksesori yang dipasang">{wallPlacementSize.width.toLocaleString('id-ID')} × {wallPlacementSize.height.toLocaleString('id-ID')} m</p>}
-            <WallPositionFields shop={shop} item={wallPlacement} onChange={(patch) => setWallPlacement({ ...wallPlacement, ...patch })} onWallChange={(candidate) => candidate ? setWallPlacement(candidate) : announce('Belum ada posisi kosong di dinding itu.')} />
+            <WallPositionFields shop={shop} item={wallPlacement} onChange={(patch) => setWallPlacement({ ...wallPlacement, ...patch })} onWallChange={chooseWallMount} />
             <button className="button button-purple full-width wall-place-confirm" disabled={!wallPlacementValid} onClick={() => placeWallAt(wallPlacement)}>Pasang di sini<Check size={15} /></button><button className="text-button full-width" onClick={() => setWallPlacement(null)}>Batal</button>
           </> : selected && selectedEntry && !placement ? <>
             <div className="inspector-head"><span className="eyebrow">SENTUHAN KECILMU</span><button className="icon-button" aria-label="Tutup detail barang" onClick={() => setSelectedId(null)}><X size={16} /></button></div>
@@ -584,7 +604,7 @@ function WallPositionFields({ shop, item, onChange, onWallChange }: { shop: Shop
     <label><span className="field-label">BIDANG DINDING</span><select aria-label="Dinding aksesori" value={current ? key(current) : ''} onChange={(e) => {
       const run = runs.find((candidate) => key(candidate) === e.target.value);
       if (!run) return;
-      const candidate = findWallPlacement(shop, item, { wall: run.wall, line: run.line, offset: (run.start + run.end) / 2, height: item.height });
+      const candidate = findWallPlacement(shop, item, { wall: run.wall, line: run.line, offset: (run.start + run.end) / 2, height: Math.max(entry.height / 2, Math.min(getWallHeight(shop) - entry.height / 2, item.height)) });
       onWallChange(candidate && candidate.wall === run.wall && candidate.line === run.line && candidate.offset - entry.width / 2 >= run.start && candidate.offset + entry.width / 2 <= run.end ? candidate : null);
     }}>
       {!current && <option value="">Arahkan ke dinding</option>}

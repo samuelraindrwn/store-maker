@@ -179,3 +179,12 @@
 .room-partition-entry .button{display:flex;justify-content:flex-start;gap:8px;min-height:44px}
 .room-partition-entry .button small{margin-left:auto;white-space:nowrap;font-size:9px;color:#8d7b9b}
 .room-partition-entry .button span{min-width:0;text-align:left}
+
+.wall-mount-toolbar{position:absolute;z-index:8;top:61px;left:50%;transform:translateX(-50%);width:calc(100% - 28px);max-width:420px;padding:10px 12px;border:1px solid #e6dced;border-radius:13px;background:#fffdf8f5;box-shadow:0 5px 20px #483b5010;color:#756184}
+.wall-mount-title{display:block;margin-bottom:7px;font-size:8px;letter-spacing:1.2px;font-weight:800;text-align:center}
+.wall-mount-buttons{display:flex;gap:4px}
+.wall-mount-buttons button{flex:1;min-width:0;min-height:38px;padding:8px 5px;border-radius:8px;background:#f2edf7;color:#775f8f;font-size:11px;font-weight:750}
+.wall-mount-buttons button[aria-pressed=true]{background:#7952c5;color:#fff}
+.wall-mount-buttons button:disabled{opacity:.4;cursor:not-allowed}
+.wall-mount-hint{display:block;margin-top:7px;font-size:10px;line-height:1.5;text-align:center}
+@media(max-width:760px){.wall-mount-toolbar{top:55px;padding:8px;max-width:370px}.wall-mount-buttons button{min-height:44px;font-size:10px}.wall-mount-hint{font-size:9px}}

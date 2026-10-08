@@ -971,6 +971,10 @@ export function createInitialShop(): ShopDocument {
   const make = (id: string, kind: ItemKind, x: number, z: number, changes: Partial<ShopItem> = {}): ShopItem => ({
     ...createItem(kind), id, x, z, ...changes,
   })
+  const window = (id: string, wall: WallSide, line: number, offset: number): WallItem => ({
+    id, kind: 'window', wall, line, offset, height: 1.5, width: 1.8, sizeHeight: 1.4,
+    color: '#F5EAD6', text: '', lit: false, windowStyle: 'classic',
+  })
   const shop: ShopDocument = {
     ...createEmptyShop(),
     name: 'Sudut Cerita', width: 10, depth: 9,
@@ -998,6 +1002,10 @@ export function createInitialShop(): ShopDocument {
     interiorDoors: [{ id: 'wc-door', wallId: 'wc-front-wall', offset: 8.5, width: 1, color: '#B697B8', open: false }],
     upperFloors: [{
       ...createEmptyShop(), name: 'Sudut Cerita', width: 10, depth: 9, floorColor: '#D9CBB6',
+      wallItems: [
+        window('warehouse-front-window', 'front', 9, 5),
+        window('warehouse-right-window', 'right', 10, 5),
+      ],
       items: [
         make('warehouse-rack-a', 'warehouse-rack', 3, 0),
         make('warehouse-rack-b', 'warehouse-rack', 6, 0),
@@ -1011,7 +1019,11 @@ export function createInitialShop(): ShopDocument {
     exterior: { wallColor: '#EADCCA', trimColor: '#847293', awning: true },
   }
   delete shop.wallItems
-  shop.wallItems = getWallItems(shop)
+  shop.wallItems = [
+    ...getWallItems(shop),
+    window('ground-front-window', 'front', 9, 2.2),
+    window('ground-right-window', 'right', 10, 5),
+  ]
   return addDefaultStandingSign(shop)
 }
 

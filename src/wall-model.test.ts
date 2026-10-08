@@ -139,7 +139,7 @@ describe('legacy decorations and safe persistence', () => {
     expect(doc.wallItems).toBeUndefined();
     expect(parseShop(doc)).toEqual(doc);
     expect(createEmptyShop().wallItems).toEqual([]);
-    expect(createInitialShop().wallItems).toHaveLength(2);
+    expect(createInitialShop().wallItems).toHaveLength(4);
   });
 
   it('synthesizes only legacy decorations that fit and persists an intentional removal', () => {

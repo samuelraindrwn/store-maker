@@ -27,6 +27,7 @@ export type SceneState = {
   selectedPartitionId?: string | null;
   selectedDoor: boolean;
   wallPlacement: WallItem | null;
+  wallPlacementMount?: Pick<WallItem, 'wall' | 'line'> | null;
   showGrid: boolean;
   showWalls: boolean;
   preview: boolean;
@@ -157,6 +158,8 @@ export class ShopScene {
   private footprint: THREE.Group | null = null;
   private wallSelection: THREE.Group | null = null;
   private wallGhost: THREE.Group | null = null;
+  private wallMountGuide: THREE.Group | null = null;
+  private wallMountGuideKey = '';
   private wallFootprint: THREE.Group | null = null;
   private wallDragFrame: THREE.Group | null = null;
   private wallDragValid: boolean | null = null;
@@ -482,6 +485,9 @@ export class ShopScene {
   private updateWallPlacement() {
     if (!this.state) return;
     const candidate = !this.state.preview && this.state.showWalls && getFloorCells(this.state.shop).length > 0 ? this.state.wallPlacement : null;
+    this.updateWallMountGuide(candidate ? this.state.wallPlacementMount : null);
+    this.renderer.domElement.dataset.wallPlacement = JSON.stringify(candidate);
+    this.renderer.domElement.dataset.wallPlacementMount = JSON.stringify(candidate ? this.state.wallPlacementMount ?? null : null);
     if (!candidate) {
       if (this.wallGhost) disposeGroup(this.wallGhost);
       if (this.wallFootprint) disposeGroup(this.wallFootprint);
@@ -561,7 +567,11 @@ export class ShopScene {
   private wallCandidateAt(event: PointerEvent, source: WallItem, fallback = false) {
     if (!this.state?.showWalls) return null;
     this.prepareRay(event);
-    const hit = intersectWall(this.raycaster.ray, this.state.shop, fallback || source.wall === 'front' || source.wall === 'right' ? source : undefined);
+    if (!fallback && this.state.wallPlacement && this.state.wallPlacementMount) {
+      const hit = intersectWallPlane(this.raycaster.ray, this.state.shop, this.state.wallPlacementMount);
+      return hit ? { ...source, wall: hit.wall, line: hit.line, offset: hit.offset, height: hit.height } : null;
+    }
+    const hit = intersectWall(this.raycaster.ray, this.state.shop, fallback ? source : undefined);
     return hit ? { ...source, wall: hit.wall, line: hit.line, offset: hit.offset, height: hit.height } : null;
   }
 
@@ -1291,6 +1301,30 @@ export class ShopScene {
       if (intersection.object instanceof THREE.Mesh) return null;
     }
     return null;
+  }
+
+  private updateWallMountGuide(mount?: Pick<WallItem, 'wall' | 'line'> | null) {
+    if (!this.state) return;
+    const shop = this.state.shop, height = getWallHeight(shop);
+    const runs = mount ? getWallRuns(shop).filter(run => run.wall === mount.wall && run.line === mount.line) : [];
+    const key = JSON.stringify([runs, shop.width, shop.depth, height]);
+    if (key === this.wallMountGuideKey) return;
+    this.wallMountGuideKey = key;
+    if (this.wallMountGuide) disposeGroup(this.wallMountGuide);
+    this.wallMountGuide = null;
+    this.renderer.domElement.dataset.wallMountGuide = JSON.stringify(mount ?? null);
+    if (!runs.length) return;
+    const group = new THREE.Group(); group.name = 'wall-mount-guide';
+    for (const run of runs) {
+      const position = wallItemPosition(shop, { ...this.state.wallPlacement!, wall: run.wall, line: run.line, offset: (run.start + run.end) / 2, height: height / 2 });
+      const panel = new THREE.Group(); panel.position.set(position.x, position.y, position.z); panel.rotation.y = position.rotation;
+      const geometry = new THREE.PlaneGeometry(run.end - run.start, height);
+      const surface = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: '#ad8fd0', transparent: true, opacity: 0.055, depthWrite: false, side: THREE.DoubleSide }));
+      const outline = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineDashedMaterial({ color: '#9565c6', transparent: true, opacity: 0.6, dashSize: 0.16, gapSize: 0.09, depthWrite: false }));
+      outline.computeLineDistances(); panel.add(surface, outline); group.add(panel);
+    }
+    group.traverse(object => { object.raycast = () => undefined; });
+    this.wallMountGuide = group; this.scene.add(group); this.renderDirty = true;
   }
 
   private pickPartitionAt(event: PointerEvent): string | null {
