@@ -82,7 +82,7 @@ export interface ShopDocument {
   exterior?: ExteriorDesign
 }
 
-export interface RoofDesign { style: 'tiles' | 'rooftop'; color: string; garden: boolean; stairAccess?: 'open' | 'enclosed' }
+export interface RoofDesign { style: 'tiles' | 'rooftop'; color: string; garden: boolean; stairAccess?: 'open' | 'enclosed'; stairDoors?: Record<string, boolean> }
 export interface RooftopDesign { items: ShopItem[]; floorColor: string }
 export interface ExteriorDesign { wallColor: string; trimColor: string; awning: boolean; wallMaterial?: 'plaster' | 'brick' }
 export const MAX_LEVELS = 4
@@ -231,10 +231,16 @@ function isColor(value: unknown): value is string {
   return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)
 }
 
+function isStairDoorState(value: unknown): value is Record<string, boolean> {
+  return isRecord(value) && Reflect.ownKeys(value).length <= MAX_ITEMS
+    && Reflect.ownKeys(value).every(key => typeof key === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(key) && typeof value[key] === 'boolean')
+}
+
 function isRoofDesign(value: unknown): value is RoofDesign {
-  return isRecord(value) && keysWithOptional(value, ['style', 'color', 'garden'], ['stairAccess'])
+  return isRecord(value) && keysWithOptional(value, ['style', 'color', 'garden'], ['stairAccess', 'stairDoors'])
     && (value.style === 'tiles' || value.style === 'rooftop') && isColor(value.color) && typeof value.garden === 'boolean'
     && (!own(value, 'stairAccess') || value.stairAccess === 'open' || value.stairAccess === 'enclosed')
+    && (!own(value, 'stairDoors') || isStairDoorState(value.stairDoors))
 }
 
 function isExteriorDesign(value: unknown): value is ExteriorDesign {
@@ -905,8 +911,46 @@ export function getLevelDocument(doc: ShopDocument, index: number): ShopDocument
 }
 
 /** Defaults remain virtual so opening a legacy design never changes its saved shape. */
-export function getRoof(doc: ShopDocument): Required<RoofDesign> {
+export function getRoof(doc: ShopDocument): RoofDesign & { stairAccess: 'open' | 'enclosed' } {
   return { style: 'tiles', color: '#B96B51', garden: false, stairAccess: 'open', ...doc.roof }
+}
+
+/** A missing saved state means a closed door, including legacy roof designs. */
+export function getRooftopDoorOpen(doc: ShopDocument, stairId: string): boolean {
+  return doc.roof?.stairDoors?.[stairId] === true
+}
+
+/** Only real openings in the rooftop deck create a stair house and its door. */
+export function getRooftopDoorIds(doc: ShopDocument): string[] {
+  const roof = getRoof(doc)
+  if (roof.style !== 'rooftop' || roof.stairAccess !== 'enclosed') return []
+  const top = getLevelDocument(doc, getLevelCount(doc) - 1), cells = getFloorCells(top)
+  return top.items.filter(item => {
+    if (item.kind !== 'stairs') return false
+    const size = getItemSize(item), footprint = getItemFootprint(item)
+    const alongZ = item.rotation % 180 === 0
+    const across = { min: size.width * 0.02, max: size.width * 0.98 }
+    const along = item.rotation === 90 || item.rotation === 180
+      ? { min: size.depth * 0.10, max: size.depth * 0.98 }
+      : { min: size.depth * 0.02, max: size.depth * 0.90 }
+    const minX = item.x + (alongZ ? across.min : along.min), maxX = item.x + (alongZ ? across.max : along.max)
+    const minZ = item.z + (alongZ ? along.min : across.min), maxZ = item.z + (alongZ ? along.max : across.max)
+    return footprint.width > 0 && footprint.depth > 0
+      && cells.some(cell => cell.x < maxX && cell.x + 1 > minX && cell.z < maxZ && cell.z + 1 > minZ)
+  }).map(item => item.id)
+}
+
+/** Each stair house has its own door; edits never affect the entrance downstairs. */
+export function setRooftopDoorOpen(doc: ShopDocument, stairId: string, open: boolean): ShopDocument {
+  const roof = getRoof(doc), ids = new Set(getRooftopDoorIds(doc))
+  if (typeof stairId !== 'string' || typeof open !== 'boolean' || !ids.has(stairId)
+    || getRooftopDoorOpen(doc, stairId) === open) return doc
+  const stairDoors = Object.fromEntries(Object.entries(roof.stairDoors ?? {}).filter(([id]) => ids.has(id)))
+  if (open) stairDoors[stairId] = true
+  else delete stairDoors[stairId]
+  // Opening an existing door must never seed furniture or alter the roof layout.
+  const nextRoof = { ...doc.roof!, stairDoors }
+  return isRoofDesign(nextRoof) ? { ...doc, roof: nextRoof } : doc
 }
 
 function rooftopFloor(doc: ShopDocument, rooftop: RooftopDesign): ShopDocument {
@@ -1051,12 +1095,15 @@ export function getExterior(doc: ShopDocument): ExteriorDesign {
 export function getExteriorWallMaterial(doc: ShopDocument): 'plaster' | 'brick' { return doc.exterior?.wallMaterial ?? 'plaster' }
 
 export function setRoof(doc: ShopDocument, patch: Partial<RoofDesign>): ShopDocument {
-  if (!isRecord(patch) || Reflect.ownKeys(patch).some(key => key !== 'style' && key !== 'color' && key !== 'garden' && key !== 'stairAccess')) return doc
+  if (!isRecord(patch) || Reflect.ownKeys(patch).some(key => key !== 'style' && key !== 'color' && key !== 'garden' && key !== 'stairAccess' && key !== 'stairDoors')) return doc
   const current = getRoof(doc)
   const roof = { ...current, ...patch }
   if (!isRoofDesign(roof)) return doc
+  const previousDoors = current.stairDoors ?? {}, nextDoors = roof.stairDoors ?? {}
   const unchanged = current.style === roof.style && current.color === roof.color && current.garden === roof.garden && current.stairAccess === roof.stairAccess
+    && Object.keys(previousDoors).length === Object.keys(nextDoors).length && Object.keys(previousDoors).every(id => previousDoors[id] === nextDoors[id])
   if (unchanged) return doc
+  if (roof.stairDoors) roof.stairDoors = { ...roof.stairDoors }
   let result: ShopDocument = { ...doc, roof }
   if (roof.style === 'rooftop') {
     if (current.style !== 'rooftop') result = ensureRooftopAccess(result)
@@ -1342,7 +1389,7 @@ function parseFloor(value: unknown, allowBuilding: boolean): ShopDocument | null
         result.upperFloors.push(floor)
       }
     }
-    if (isRoofDesign(value.roof)) result.roof = { ...value.roof }
+    if (isRoofDesign(value.roof)) result.roof = { ...value.roof, ...(value.roof.stairDoors ? { stairDoors: { ...value.roof.stairDoors } } : {}) }
     if (isExteriorDesign(value.exterior)) result.exterior = { ...value.exterior }
     if (own(value, 'rooftop')) {
       const rooftop = parseRooftop(value.rooftop, result)

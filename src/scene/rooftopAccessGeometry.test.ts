@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { createEmptyShop, createItem, getItemFootprint, getWallHeight, type Rotation, type ShopDocument } from '../model';
-import { buildBuilding, buildRooftopStructure, getBuildingBounds, getStairRise } from './buildingObjects';
+import { createEmptyShop, createItem, getItemFootprint, getRooftopDoorIds, getWallHeight, setRooftopDoorOpen, type Rotation, type ShopDocument } from '../model';
+import { buildBuilding, buildRooftopStructure, getBuildingBounds, getStairRise, ROOFTOP_DOOR_OPEN_ANGLE } from './buildingObjects';
 import { applyItemSize, buildItem, disposeGroup } from './objects';
 import { buildStairwellRims, getStairOpenings } from './stairGeometry';
 
@@ -11,25 +11,56 @@ function fixture(rotation: Rotation = 0): ShopDocument {
 }
 
 describe('roof stair houses and joined landings', () => {
-  it.each([0, 90, 180, 270] as const)('encloses rotation %i with an open exit and a solid roof', rotation => {
+  it.each([0, 90, 180, 270] as const)('encloses rotation %i with a closed, pickable door and a solid roof', rotation => {
     const building = fixture(rotation), structure = buildRooftopStructure(building);
     try {
       structure.updateMatrixWorld(true);
       const house = structure.getObjectByName('stair-access-enclosure:access')!;
       expect(house).toBeDefined();
       expect(house.getObjectByName('stair-access-roof')).toBeDefined();
-      expect(house.getObjectByName('stair-access-open-door')).toBeDefined();
+      const door = house.getObjectByName('stair-access-door')!;
+      expect(door).toBeDefined();
+      expect(door.userData.rooftopDoorId).toBe('access');
+      expect(getRooftopDoorIds(building)).toEqual([door.userData.rooftopDoorId]);
+      expect(door.rotation.y).toBe(0);
       expect(structure.getObjectByName('stairwell-guardrail')).toBeUndefined();
       const hole = getStairOpenings(building, 1)[0];
       const depth = rotation % 180 === 0 ? hole.maxZ - hole.minZ : hole.maxX - hole.minX;
       const entry = house.localToWorld(new THREE.Vector3(0, 1, -depth / 2 - 0.22));
       const direction = new THREE.Vector3(0, 0, 1).transformDirection(house.matrixWorld);
-      expect(new THREE.Raycaster(entry, direction, 0, 0.5).intersectObject(house, true)).toHaveLength(0);
+      const doorHits = new THREE.Raycaster(entry, direction, 0, 0.5).intersectObject(house, true);
+      expect(doorHits.length).toBeGreaterThan(0);
+      expect(doorHits[0].object.parent).toBe(door);
+      expect(['stair-access-door-leaf', 'stair-access-door-window']).toContain(doorHits[0].object.name);
       const roofHits = new THREE.Raycaster(house.localToWorld(new THREE.Vector3(0, 4, 0)), new THREE.Vector3(0, -1, 0)).intersectObject(house, true);
       expect(roofHits[0].object.name).toBe('stair-access-roof-cap');
       expect(new THREE.Box3().setFromObject(structure).max.y).toBeLessThanOrEqual(2.401);
       expect(getBuildingBounds(building).height).toBeGreaterThanOrEqual(getWallHeight(building) + 0.24 + 2.4);
     } finally { disposeGroup(structure); }
+  });
+
+  it.each([0, 90, 180, 270] as const)('opens the rooftop door outward and clears its entry at rotation %i', rotation => {
+    const building = setRooftopDoorOpen(fixture(rotation), 'access', true);
+    const structure = buildRooftopStructure(building), exterior = buildBuilding(building);
+    try {
+      structure.updateMatrixWorld(true);
+      const house = structure.getObjectByName('stair-access-enclosure:access')!;
+      const door = house.getObjectByName('stair-access-door')!;
+      expect(door.rotation.y).toBe(ROOFTOP_DOOR_OPEN_ANGLE);
+      expect(exterior.getObjectByName('stair-access-door')!.rotation.y).toBe(ROOFTOP_DOOR_OPEN_ANGLE);
+      const hole = getStairOpenings(building, 1)[0];
+      const depth = rotation % 180 === 0 ? hole.maxZ - hole.minZ : hole.maxX - hole.minX;
+      const entry = house.localToWorld(new THREE.Vector3(0, 1, -depth / 2 - 0.22));
+      const direction = new THREE.Vector3(0, 0, 1).transformDirection(house.matrixWorld);
+      expect(new THREE.Raycaster(entry, direction, 0, 0.5).intersectObject(house, true)).toHaveLength(0);
+      const leaf = door.getObjectByName('stair-access-door-leaf')!;
+      const center = house.worldToLocal(leaf.getWorldPosition(new THREE.Vector3()));
+      expect(center.z).toBeLessThan(-depth / 2);
+      // Opening keeps the leaf and handle present, so the same door can be
+      // selected and closed again rather than being replaced by an empty gap.
+      expect(door.getObjectByName('stair-access-door-handle')).toBeDefined();
+      expect(door.userData.rooftopDoorId).toBe('access');
+    } finally { disposeGroup(structure); disposeGroup(exterior); }
   });
 
   it.each([0, 90, 180, 270] as const)('clears the crossing rail but preserves side guards beside an aligned upper flight at rotation %i', rotation => {

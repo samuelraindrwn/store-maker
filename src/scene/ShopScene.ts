@@ -14,9 +14,9 @@ import { setWallClockTime } from './wallClock';
 import { getCityPedestrianState, setCityTimeOfDay, updateCityPedestrians } from './city';
 import { applyExteriorWallMaterial } from './exteriorMaterials';
 import { CozyBackdrop } from './CozyBackdrop';
-import { buildBuilding, buildInteriorContext, buildRooftopStructure, buildStairLandings, getBuildingBounds, getLevelBaseY, getStairRise, LEVEL_SLAB } from './buildingObjects';
+import { buildBuilding, buildInteriorContext, buildRooftopStructure, buildStairLandings, getBuildingBounds, getLevelBaseY, getStairRise, LEVEL_SLAB, ROOFTOP_DOOR_OPEN_ANGLE } from './buildingObjects';
 import { getStairOpenings } from './stairGeometry';
-import { canPlaceLevelItem, canPlaceRooftop, getLevelCount, getLevelDocument, getRoof, getRooftopDocument } from '../model';
+import { canPlaceLevelItem, canPlaceRooftop, getLevelCount, getLevelDocument, getRoof, getRooftopDocument, getRooftopDoorOpen } from '../model';
 import { canPlacePartition, getEntranceWall, getInteriorDoors, getPartitions, getPartitionPosition, placePartition, wallIsHorizontal, type PartitionWall, type WallSide } from '../model';
 
 export type Cell = { x: number; z: number };
@@ -51,6 +51,7 @@ export type SceneCallbacks = {
   onSelectWall: (id: string | null) => void;
   onSelectPartition?: (id: string | null) => void;
   onSelectDoor: () => void;
+  onToggleRooftopDoor?: (stairId: string) => void;
   onWallPlace: (candidate: WallItem) => void;
   onWallHover: (candidate: WallItem | null) => void;
   onMove?: (id: string, x: number, z: number) => void;
@@ -61,7 +62,8 @@ export type SceneCallbacks = {
 };
 
 type Gesture = {
-  kind: 'resize' | 'height' | 'item' | 'door' | 'paint' | 'wall-item' | 'object-resize' | 'partition';
+  kind: 'resize' | 'height' | 'item' | 'door' | 'rooftop-door' | 'paint' | 'wall-item' | 'object-resize' | 'partition';
+  rooftopDoorId?: string;
   partitionCandidate?: PartitionWall;
   pointerId: number;
   handle?: BuildHandleId;
@@ -159,6 +161,7 @@ export class ShopScene {
   private itemDragFrame: THREE.Group | null = null;
   private itemDragFrameValid: boolean | null = null;
   private doorTarget = 0;
+  private readonly rooftopDoorTargets = new Map<THREE.Object3D, number>();
   private lastFrameTime = 0;
   private lastShadowRefresh = 0;
   private interactionMessage: string | null = null;
@@ -292,7 +295,7 @@ export class ShopScene {
     this.ground.position.y = -0.401 - floorY;
     this.backdrop.configureGround(this.ground);
     const stairOpenings = getStairOpenings(buildingDoc, activeLevel);
-    const nextRooftopKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, shop.floorColor, getExterior(buildingDoc), getRoof(buildingDoc), stairOpenings]);
+    const nextRooftopKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, shop.floorColor, getExterior(buildingDoc), this.roofGeometry(buildingDoc), stairOpenings]);
     if (next.rooftopOnly && nextRooftopKey !== this.rooftopKey) {
       if (this.rooftop) disposeGroup(this.rooftop);
       this.rooftop = buildRooftopStructure(buildingDoc);
@@ -431,7 +434,18 @@ export class ShopScene {
     this.updateObjectResize();
     this.updatePreviewMetadata();
     this.clocks = [];
-    this.scene.traverse(object => { if (object.userData.gameClock) this.clocks.push(object); });
+    this.rooftopDoorTargets.clear();
+    this.scene.traverse(object => {
+      if (object.userData.gameClock) this.clocks.push(object);
+      if (typeof object.userData.rooftopDoorId === 'string') {
+        const target = getRooftopDoorOpen(buildingDoc, object.userData.rooftopDoorId) ? ROOFTOP_DOOR_OPEN_ANGLE : 0;
+        this.rooftopDoorTargets.set(object, target);
+        if (this.reducedMotion.matches && object.rotation.y !== target) {
+          object.rotation.y = target;
+          this.renderer.shadowMap.needsUpdate = true;
+        }
+      }
+    });
     this.setGameTime(this.gameMinutes);
     if (lightingContentChanged) this.lighting.refreshSources([this.items, this.wallItems, this.city, this.building]);
     this.lighting.update(0, true);
@@ -487,7 +501,12 @@ export class ShopScene {
         editing ? null : getWallItems(floor), editing ? null : getEntrance(floor),
         editing && level === 0 ? floor.items.filter(item => !isStandingSign(item.kind)) : floor.items];
     });
-    return JSON.stringify([activeLevel, levels, getExterior(building), getRoof(building), building.rooftop, showCity]);
+    return JSON.stringify([activeLevel, levels, getExterior(building), this.roofGeometry(building), building.rooftop, showCity]);
+  }
+
+  private roofGeometry(building: ShopDocument) {
+    const { stairDoors: _doors, ...roof } = getRoof(building);
+    return roof;
   }
 
   private previewExteriorHeight(height: number) {
@@ -1095,7 +1114,7 @@ export class ShopScene {
     if (kind === 'paint') {
       const cell = this.cellAt(event, true);
       if (cell) this.paintAt(cell);
-    } else this.setInteraction(kind === 'partition' ? 'Tarik mengikuti garis petak untuk menggambar tembok dalam.' : kind === 'wall-item' ? 'Geser di dinding, atau pindahkan ke sisi lain. Lepas untuk menyimpan.' : kind === 'item' ? 'Geser barang ke petak yang kosong. Lepas untuk menaruhnya.' : kind === 'height' ? 'Tarik naik atau turun untuk mengubah tinggi dinding.' : kind === 'door' ? 'Geser pintu sepanjang sisi yang dipilih.' : 'Tarik batas ruangan. Barang di dalam tetap aman.');
+    } else this.setInteraction(kind === 'rooftop-door' ? 'Klik pintu untuk membuka atau menutup akses rooftop.' : kind === 'partition' ? 'Tarik mengikuti garis petak untuk menggambar tembok dalam.' : kind === 'wall-item' ? 'Geser di dinding, atau pindahkan ke sisi lain. Lepas untuk menyimpan.' : kind === 'item' ? 'Geser barang ke petak yang kosong. Lepas untuk menaruhnya.' : kind === 'height' ? 'Tarik naik atau turun untuk mengubah tinggi dinding.' : kind === 'door' ? 'Geser pintu sepanjang sisi yang dipilih.' : 'Tarik batas ruangan. Barang di dalam tetap aman.');
   }
 
   private applyRoomPreview(dimensions: Dimensions) {
@@ -1154,6 +1173,10 @@ export class ShopScene {
       return;
     }
     const pixelDistance = Math.hypot(event.clientX - drag.startClient.x, event.clientY - drag.startClient.y);
+    if (drag.kind === 'rooftop-door') {
+      if (pixelDistance > 6) { drag.moved = true; this.suppressClick = true; }
+      return;
+    }
     if (!drag.moved && pixelDistance < 4) return;
     drag.moved = true;
     this.suppressClick = true;
@@ -1301,6 +1324,18 @@ export class ShopScene {
     this.renderer.domElement.dataset.interaction = 'idle';
     this.renderer.domElement.style.cursor = this.state?.placement ? 'crosshair' : 'grab';
     if (this.renderer.domElement.hasPointerCapture(drag.pointerId)) this.renderer.domElement.releasePointerCapture(drag.pointerId);
+    if (drag.kind === 'rooftop-door') {
+      // A door tap only claims the pointer; it creates no room/window draft.
+      this.setInteraction(null);
+      this.updateSelection(); this.updateWallSelection(); this.updatePartitionSelection();
+      this.updateHandles(); this.updateObjectResize();
+      this.projectionDirty = true; this.renderDirty = true;
+      if (!cancelled && !drag.moved && drag.rooftopDoorId) {
+        this.renderer.domElement.style.cursor = 'pointer';
+        this.callbacks.onToggleRooftopDoor?.(drag.rooftopDoorId);
+      }
+      return;
+    }
     this.restorePreview();
     this.setInteraction(null);
     if (cancelled) return;
@@ -1355,11 +1390,35 @@ export class ShopScene {
     else delete data.previewEntrancePosition;
   }
 
-  private prepareRay(event: PointerEvent) {
+  private prepareRay(event: Pick<PointerEvent, 'clientX' | 'clientY'>) {
     this.scene.updateMatrixWorld(true);
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(this.pointer, this.camera);
+  }
+
+  private pickRooftopDoorAt(event: Pick<PointerEvent, 'clientX' | 'clientY'>): string | null {
+    if (!this.state || (!this.state.rooftopOnly && !this.state.exteriorOnly) || getRoof(this.state.building ?? this.state.shop).stairAccess !== 'enclosed') return null;
+    const doors = [...this.rooftopDoorTargets.keys()].filter(object => this.isObjectVisible(object));
+    if (!doors.length) return null;
+    this.prepareRay(event);
+    const candidate = this.raycaster.intersectObjects(doors, true)[0];
+    if (!candidate) return null;
+    const far = this.raycaster.far;
+    this.raycaster.far = Math.min(far, candidate.distance + 0.0001);
+    try {
+      for (const hit of this.raycaster.intersectObjects(this.scene.children, true)) {
+        if (!this.isObjectVisible(hit.object)) continue;
+        let object: THREE.Object3D | null = hit.object;
+        while (object) {
+          if (typeof object.userData.rooftopDoorId === 'string') return object.userData.rooftopDoorId;
+          object = object.parent;
+        }
+        // Walls, the stair-house roof, and nearby furniture occlude the door.
+        if (hit.object instanceof THREE.Mesh) return null;
+      }
+    } finally { this.raycaster.far = far; }
+    return null;
   }
 
   private cellAt(event: PointerEvent, allowEmpty = false): Cell | null {
@@ -1540,7 +1599,14 @@ export class ShopScene {
     if (event.button !== 0 || !this.state) return;
     this.suppressClick = false;
     this.pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId };
-    if (this.state.placement || this.state.wallPlacement || this.state.preview) return;
+    if (this.state.placement || this.state.wallPlacement) return;
+    const rooftopDoorId = this.pickRooftopDoorAt(event);
+    if (rooftopDoorId) {
+      this.beginGesture(event, 'rooftop-door');
+      if (this.gesture) this.gesture.rooftopDoorId = rooftopDoorId;
+      return;
+    }
+    if (this.state.preview) return;
     if (this.state.editMode === 'build' && this.state.buildTool === 'partition') {
       if (!this.pickPartitionAt(event)) this.beginGesture(event, 'partition');
       return;
@@ -1591,7 +1657,11 @@ export class ShopScene {
     if (!this.state) return;
     if (this.gesture) { this.dragGesture(event); return; }
     if (this.pointerStart && Math.hypot(event.clientX - this.pointerStart.x, event.clientY - this.pointerStart.y) > 6) this.suppressClick = true;
-    if (this.state.preview || this.activePointers.size > 1) return;
+    if (this.activePointers.size > 1) return;
+    if (!this.state.placement && !this.state.wallPlacement && this.pickRooftopDoorAt(event)) {
+      this.setHover(null); this.renderer.domElement.style.cursor = 'pointer'; return;
+    }
+    if (this.state.preview) { this.renderer.domElement.style.cursor = 'grab'; return; }
     if (this.resizeSelection()) {
       this.resizeHover = null;
       this.updateObjectResize();
@@ -1856,6 +1926,13 @@ export class ShopScene {
     data.editMode = this.state.editMode ?? 'arrange';
     data.exteriorStoreys = JSON.stringify(this.state.exteriorOnly ? this.building?.children.map(object => ({ name: object.name, level: object.userData.level, y: object.position.y })) : []);
     data.rooftopOnly = String(!!this.state.rooftopOnly);
+    data.rooftopContextId = this.state.rooftopOnly ? this.rooftop?.uuid ?? '' : '';
+    data.rooftopDoors = JSON.stringify([...this.rooftopDoorTargets.keys()].filter(object => this.isObjectVisible(object)).map(object => {
+      const center = new THREE.Box3().setFromObject(object.getObjectByName('stair-access-door-leaf') ?? object).getCenter(new THREE.Vector3());
+      const point = this.project(center), id = object.userData.rooftopDoorId as string;
+      return { id, open: getRooftopDoorOpen(this.state!.building ?? this.state!.shop, id), angle: object.rotation.y,
+        ...point, clickable: this.pickRooftopDoorAt(point) === id };
+    }));
     data.rooftopStairAccess = getRoof(this.state.building ?? this.state.shop).stairAccess ?? 'open';
     let enclosures = 0, guardrails = 0;
     (this.state.exteriorOnly ? this.building : this.rooftop)?.traverse(object => { if (object.name.startsWith('stair-access-enclosure:') && this.isObjectVisible(object)) enclosures++; });
@@ -2009,6 +2086,12 @@ export class ShopScene {
       if ((this.state?.activeLevel ?? 0) === 0) this.renderer.domElement.dataset.doorAngle = String(pivot.rotation.y);
       this.renderDirty = true;
       this.projectionDirty = true;
+      this.refreshDragShadows();
+    }
+    for (const [door, target] of this.rooftopDoorTargets) {
+      if (door.rotation.y === target) continue;
+      door.rotation.y = this.reducedMotion.matches || Math.abs(door.rotation.y - target) < 0.002 ? target : THREE.MathUtils.damp(door.rotation.y, target, 12, delta);
+      this.renderDirty = true; this.projectionDirty = true;
       this.refreshDragShadows();
     }
     if (this.projectionDirty) { this.backdrop.updateGround(this.camera); this.updateHandles(); this.updateObjectResize(); this.updateItemPlatforms(); this.updateCellMetadata(); }

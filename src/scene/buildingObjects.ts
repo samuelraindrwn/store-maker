@@ -1,11 +1,13 @@
 import * as THREE from 'three';
-import { getExterior, getFloorBounds, getFloorCells, getItemFootprint, getLevelCount, getLevelDocument, getRoof, getRooftopDocument, getWallHeight, getWallItemMount, getWallItems, wallItemPosition, type ShopDocument } from '../model';
+import { getExterior, getFloorBounds, getFloorCells, getItemFootprint, getLevelCount, getLevelDocument, getRoof, getRooftopDocument, getRooftopDoorOpen, getWallHeight, getWallItemMount, getWallItems, wallItemPosition, type ShopDocument } from '../model';
 import { applyWallItemSize, box, buildContourFloor, buildItem, buildRoom, buildWallItem, disposeGroup } from './objects';
 import { applyExteriorWallMaterial } from './exteriorMaterials';
 import { getItemSupport } from './itemSupport';
 import { buildStairwellRims, getStairOpenings } from './stairGeometry';
 
 export const LEVEL_SLAB = 0.24;
+/** Positive Y rotation swings the local +X leaf outward through the -Z exit. */
+export const ROOFTOP_DOOR_OPEN_ANGLE = Math.PI / 2;
 type Edge = { side: 'north' | 'south' | 'east' | 'west'; line: number; start: number; end: number };
 
 /** Floor zero starts at ground; each higher floor follows the actual height below it. */
@@ -104,7 +106,7 @@ export function buildRooftopStructure(building: ShopDocument) {
   return group;
 }
 
-/** A small weatherproof stair house with a real, open doorway at the upper exit. */
+/** A small weatherproof stair house with an operable door at the upper exit. */
 export function buildRooftopStairEnclosures(building: ShopDocument) {
   const group = new THREE.Group(); group.name = 'rooftop-stair-enclosures';
   const facade = getExterior(building);
@@ -125,8 +127,8 @@ export function buildRooftopStairEnclosures(building: ShopDocument) {
     box(house, doorWidth, wallHeight - doorHeight, thickness, facade.wallColor, 0, doorHeight + (wallHeight - doorHeight) / 2 + 0.04, exitZ).name = 'stair-access-door-header';
     for (const x of [-doorWidth / 2, doorWidth / 2]) box(house, 0.045, doorHeight + 0.03, thickness + 0.025, facade.trimColor, x, doorHeight / 2 + 0.04, exitZ).name = 'stair-access-door-frame';
     box(house, doorWidth + 0.05, 0.05, thickness + 0.025, facade.trimColor, 0, doorHeight + 0.04, exitZ).name = 'stair-access-door-frame';
-    const door = new THREE.Group(); door.name = 'stair-access-open-door';
-    door.position.set(-doorWidth / 2, 0.04, exitZ); door.rotation.y = Math.PI * 0.44;
+    const door = new THREE.Group(); door.name = 'stair-access-door'; door.userData.rooftopDoorId = hole.stairId;
+    door.position.set(-doorWidth / 2, 0.04, exitZ); door.rotation.y = getRooftopDoorOpen(building, hole.stairId) ? ROOFTOP_DOOR_OPEN_ANGLE : 0;
     box(door, doorWidth - 0.04, doorHeight - 0.04, 0.035, facade.trimColor, doorWidth / 2, doorHeight / 2, 0).name = 'stair-access-door-leaf';
     box(door, doorWidth - 0.18, doorHeight * 0.54, 0.012, '#C5D9D4', doorWidth / 2, doorHeight * 0.63, -0.025).name = 'stair-access-door-window';
     box(door, 0.045, 0.13, 0.05, '#D5BD81', doorWidth - 0.12, 0.96, -0.04).name = 'stair-access-door-handle';

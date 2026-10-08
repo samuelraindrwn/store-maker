@@ -204,4 +204,5 @@
 .exterior-accessory-list>button{display:flex;align-items:center;gap:8px;width:100%;padding:4px 8px;margin:5px 0;background:#faf7fd;border:1px solid #e9e2ef;border-radius:8px;text-align:left;color:#776185;font-size:11px}
 .exterior-accessory-list .furniture-art{height:42px;width:46px;flex-shrink:0}.exterior-accessory-list>button>span{flex:1}
 .roof-access-options{margin-top:20px}
+.rooftop-door-controls{display:grid;gap:8px;margin:12px 0}.rooftop-door-controls .button{white-space:normal}.rooftop-door-controls .wall-catalog-note{margin:0}
 .lamp-style-picker{margin-top:18px}.lamp-style-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.lamp-style-options button{border:1px solid #e4daec;border-radius:8px;padding:7px 3px;background:#faf8fd;color:#74627f;font-size:10px}.lamp-style-options button.active{border-color:#a985d1;background:#efe6fb}.lamp-style-options .furniture-art{width:100%;height:58px;display:block}

@@ -1,6 +1,7 @@
-import { ArrowRight, Check, Home, Paintbrush, Sun } from 'lucide-react';
+import { ArrowRight, Check, DoorClosed, DoorOpen, Home, Paintbrush, Sun } from 'lucide-react';
 import { getExterior, getRoof, getRooftopDocument, replaceRooftopDocument, setExterior, setRoof, getLevelCount, getLevelDocument, getWallItems, getWallItemMount, getExteriorWallMaterial, WALL_CATALOG, WALL_LAMP_STYLES, WALL_SIGN_STYLES, type WallSignStyle, type ShopDocument, type WallItemKind, type WallLampStyle } from '../model';
 import WallArt from './WallArt';
+import { getRooftopDoorIds, getRooftopDoorOpen, setRooftopDoorOpen } from '../model';
 
 const FACADES = ['#EADCCA', '#C8D4BE', '#DABAC5', '#BECAD9', '#D8B28E', '#C4B5D9'];
 const TRIMS = ['#847293', '#657B70', '#A77653', '#EEE7D8', '#526478', '#A96665'];
@@ -42,7 +43,21 @@ export default function ExteriorSettings({ building, onChange, onEditRooftop, ac
 
 export function RoofAccessPicker({ building, onChange }: { building: ShopDocument; onChange: (doc: ShopDocument) => void }) {
   const roof = getRoof(building);
-  return <div className="roof-access-options"><span className="field-label">AKSES TANGGA ROOFTOP</span><div className="facade-material-options" role="group" aria-label="Bentuk akses tangga rooftop">{(['open', 'enclosed'] as const).map(stairAccess => <button key={stairAccess} className={roof.stairAccess === stairAccess ? 'active' : ''} aria-pressed={roof.stairAccess === stairAccess} onClick={() => onChange(setRoof(building, { stairAccess }))}>{stairAccess === 'open' ? 'Terbuka' : 'Berdinding & beratap'}</button>)}</div></div>;
+  const doorIds = getRooftopDoorIds(building);
+  return <div className="roof-access-options">
+    <span className="field-label">AKSES TANGGA ROOFTOP</span>
+    <div className="facade-material-options" role="group" aria-label="Bentuk akses tangga rooftop">{(['open', 'enclosed'] as const).map(stairAccess => <button key={stairAccess} className={roof.stairAccess === stairAccess ? 'active' : ''} aria-pressed={roof.stairAccess === stairAccess} onClick={() => onChange(setRoof(building, { stairAccess }))}>{stairAccess === 'open' ? 'Terbuka' : 'Berdinding & beratap'}</button>)}</div>
+    {doorIds.length > 0 && <div className="rooftop-door-controls" role="group" aria-label="Pintu akses rooftop">
+      {doorIds.map((id, index) => {
+        const open = getRooftopDoorOpen(building, id);
+        return <button key={id} className="button full-width" data-rooftop-door-id={id} onClick={() => onChange(setRooftopDoorOpen(building, id, !open))}>
+          {open ? <DoorClosed size={16} /> : <DoorOpen size={16} />}
+          {open ? 'Tutup' : 'Buka'} pintu rooftop{doorIds.length > 1 ? ` ${index + 1}` : ''}
+        </button>;
+      })}
+      <p className="wall-catalog-note">Klik pintunya di tampilan 3D untuk membuka atau menutup.</p>
+    </div>}
+  </div>;
 }
 
 function ExteriorColors({ label, colors, value, onChange }: { label: string; colors: string[]; value: string; onChange: (value: string) => void }) {

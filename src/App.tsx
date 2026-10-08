@@ -10,6 +10,7 @@ import ExteriorSettings, { RoofAccessPicker } from './components/ExteriorSetting
 import { getWallItemMount, getWallLampStyle, WALL_LAMP_STYLES, getWallSignStyle, WALL_SIGN_STYLES, type WallSignStyle, type WallLampStyle } from './model';
 import PartitionPanel from './components/PartitionPanel';
 import { getPartitions, getEntranceWall, removePartition } from './model';
+import { getRooftopDoorOpen, setRooftopDoorOpen } from './model';
 import { getLevelCount, getLevelDocument, replaceLevelDocument, setLevelCount, getRoof, setRoof, getRooftopDocument, replaceRooftopDocument, canPlaceRooftop, canPlaceLevelItem, ensureRooftopAccess, hasRooftopAccess } from './model';
 import { CATALOG, FOOD_ITEM_KINDS, FOOD_PRODUCTS, createBlankShop, createInitialShop, createItem, getAllowedStocks, getEntrance, getFloorBounds, getFloorCells, getItemSize, getItemFootprint, getItemPlacementBounds, getWallHeight, isStandingSign, parseShop, placeItem, removeItem, renameShop, setEntrance, setWallHeight, updateItem, upgradeShop } from './model';
 import type { ItemKind, ProductKind, Rotation, ShopDocument, ShopItem } from './model';
@@ -134,6 +135,9 @@ export default function App() {
       return value === current.present ? current : { past: [...current.past, current.present].slice(-60), present: value, future: [] };
     });
   }, []);
+  const toggleRooftopDoor = useCallback((stairId: string) => {
+    commitBuilding(current => setRooftopDoorOpen(current, stairId, !getRooftopDoorOpen(current, stairId)));
+  }, [commitBuilding]);
   const commit = useCallback((next: ShopDocument | ((doc: ShopDocument) => ShopDocument)) => {
     commitBuilding(current => {
       if (rooftopOnly) {
@@ -457,7 +461,7 @@ export default function App() {
         <div className="scene-workspace">
           <section className={`scene-panel ${placement || wallPlacement ? 'is-placing' : ''} ${editMode === 'build' && !preview ? 'is-building' : ''} ${showCity ? 'with-city' : ''} ${nightMode ? 'is-night' : ''}`} data-testid="scene" aria-label="Toko 3D interaktif">
             <div className="scene-topline"><span className="scene-badge">{nightMode ? <Moon size={12} /> : <span className="live-dot" />}{exteriorOnly ? 'EKSTERIOR TOKOMU' : rooftopOnly ? 'ROOFTOP TOKOMU' : nightMode ? 'MALAM DI TOKOMU' : preview ? 'TOKOMU, VERSI KAMU' : 'RUANG KREATIF'}</span><span className="scene-dimensions">{exteriorOnly ? levelCount : floorCount}<span>{exteriorOnly ? ' LANTAI' : rooftopOnly ? ' PETAK / ROOFTOP' : ` PETAK / LT ${activeLevel + 1}`}</span></span></div>
-            <ShopCanvas ref={scene} revision={sceneRevision} shop={shop} building={building} activeLevel={activeLevel} rooftopOnly={rooftopOnly} exteriorOnly={exteriorOnly} selectedId={selectedId} placement={placement} selectedWallId={selectedWallId} selectedDoor={selectedDoor} wallPlacement={wallPlacement} wallPlacementMount={wallPlacementMount} resizeMode={resizeMode} showGrid={showGrid && !preview} showWalls={showWalls} showAllWalls={showAllWalls} showCity={showCity} nightMode={nightMode} gameMinutes={gameMinutes} editMode={editMode} buildTool={buildTool} preview={preview} onSelect={selectItem} onSelectWall={selectWallItem} onSelectDoor={selectDoor} selectedPartitionId={selectedPartitionId} onSelectPartition={selectPartition} onCell={placeAt} onHover={hoverCell} onWallPlace={placeWallAt} onWallHover={hoverWall} onChange={commitGesture} onInteraction={setInteraction} />
+            <ShopCanvas ref={scene} revision={sceneRevision} shop={shop} building={building} activeLevel={activeLevel} rooftopOnly={rooftopOnly} exteriorOnly={exteriorOnly} selectedId={selectedId} placement={placement} selectedWallId={selectedWallId} selectedDoor={selectedDoor} wallPlacement={wallPlacement} wallPlacementMount={wallPlacementMount} resizeMode={resizeMode} showGrid={showGrid && !preview} showWalls={showWalls} showAllWalls={showAllWalls} showCity={showCity} nightMode={nightMode} gameMinutes={gameMinutes} editMode={editMode} buildTool={buildTool} preview={preview} onSelect={selectItem} onSelectWall={selectWallItem} onSelectDoor={selectDoor} onToggleRooftopDoor={toggleRooftopDoor} selectedPartitionId={selectedPartitionId} onSelectPartition={selectPartition} onCell={placeAt} onHover={hoverCell} onWallPlace={placeWallAt} onWallHover={hoverWall} onChange={commitGesture} onInteraction={setInteraction} />
             {interaction && !preview && <div className="interaction-hud" aria-live="off"><Move size={16} /><span>{interaction}</span><kbd>Esc</kbd></div>}
             {preview && <div className="preview-label"><span className="eyebrow">DIBUAT DENGAN SEDIKIT IMAJINASI</span><h2>{building.name || 'Toko Kecilku'}</h2><div className="preview-actions"><button className="button button-dark" onClick={takePhoto}><Camera size={16} />Ambil foto toko</button>{!exteriorOnly && activeLevel === 0 && floorCount > 0 && <button className="button button-light" aria-label={entrance.open ? 'Tutup pintu masuk' : 'Buka pintu masuk'} onClick={() => commit(setEntrance(shop, { open: !entrance.open }))}><DoorOpen size={16} />{entrance.open ? 'Tutup pintu' : 'Buka pintu'}</button>}</div></div>}
             <div className="scene-controls">
