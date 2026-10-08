@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import type { ShopDocument } from '../src/model';
+import { createInitialShop, type ShopDocument } from '../src/model';
 
 const STORAGE_KEY = 'nemu.store-maker.v1';
 const EMPTY_SHOP: ShopDocument = {
@@ -210,7 +210,7 @@ test('a corrupt local save recovers to a usable editor', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByLabel('Nama toko', { exact: true })).toHaveValue('Sudut Cerita');
   await expect(page.getByTestId('catalog-plant')).toBeEnabled();
-  await expect.poll(async () => (await savedShop(page))?.items.length).toBe(10);
+  await expect.poll(() => savedShop(page)).toEqual(createInitialShop());
   await expect(page.getByTestId('scene').locator('canvas')).toHaveAttribute('data-ready', 'true');
 });
 

@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import { getEntranceAnchor, getEntranceRotation, getExterior, getFloorBounds, getFloorCells, getItemFootprint, getLevelCount, getLevelDocument, getRoof, getWallHeight, getWallItems, wallItemPosition, type ShopDocument } from '../model';
+import { getExterior, getFloorBounds, getFloorCells, getItemFootprint, getLevelCount, getLevelDocument, getRoof, getWallHeight, getWallItems, wallItemPosition, type ShopDocument } from '../model';
 import { applyWallItemSize, box, buildItem, buildRoom, buildWallItem, disposeGroup } from './objects';
-import { wallPanels } from './wallGeometry';
 import { getItemSupport } from './itemSupport';
 import { buildStairwellRims, getStairOpenings } from './stairGeometry';
 
@@ -147,35 +146,6 @@ function buildRoof(building: ShopDocument, shop: ShopDocument, base: number) {
   return group;
 }
 
-/** Close the two cutaway sides around the saved doorway; do not invent facade openings. */
-function closeCutawayWalls(parent: THREE.Group, shop: ShopDocument, groundFloor: boolean, color: string, trim: string) {
-  const anchor = getEntranceAnchor(shop), height = getWallHeight(shop);
-  for (const edge of buildingEdges(shop).filter(edge => edge.side === 'south' || edge.side === 'east')) {
-    const wall = edgeFrame(shop, edge), length = edge.end - edge.start;
-    wall.name = `exterior-wall:${edge.side}`; parent.add(wall);
-    const holes = [];
-    if (groundFloor && edge.side === 'south' && Math.abs(wall.position.z + 0.09 - anchor.z) < 0.001
-      && anchor.x >= wall.position.x - length / 2 && anchor.x <= wall.position.x + length / 2) {
-      const angle = THREE.MathUtils.degToRad(getEntranceRotation(shop));
-      const scale = Math.min(1, anchor.width / 1.84);
-      const halfWidth = (1.52 * scale * Math.abs(Math.cos(angle)) + 0.24 * Math.abs(Math.sin(angle))) / 2;
-      const center = anchor.x - wall.position.x;
-      holes.push({ start: center - halfWidth, end: center + halfWidth, bottom: 0, top: 2.19 });
-      wall.userData.entranceOpening = { x: anchor.x, z: anchor.z, width: halfWidth * 2 };
-    }
-    for (const panel of wallPanels(-length / 2 - 0.05, length / 2 + 0.05, height, holes)) {
-      const mesh = box(wall, panel.end - panel.start, panel.top - panel.bottom, 0.16, color,
-        (panel.start + panel.end) / 2, (panel.bottom + panel.top) / 2, 0.07, 0);
-      mesh.name = 'exterior-wall-panel';
-    }
-    box(wall, length + 0.12, 0.1, 0.23, trim, 0, height + 0.04, 0.07, 0.02).name = 'exterior-floor-band';
-    for (const panel of wallPanels(-length / 2, length / 2, 0.12, holes)) {
-      box(wall, panel.end - panel.start, panel.top - panel.bottom, 0.08, '#c6b3a2',
-        (panel.start + panel.end) / 2, (panel.bottom + panel.top) / 2, 0.17, 0.012).name = 'exterior-plinth';
-    }
-  }
-}
-
 /** Both exterior and floor context use fresh, disposable copies of the authored layout. */
 function buildAuthoredLevel(building: ShopDocument, level: number, options: { showCity?: boolean; exterior?: boolean }) {
   const shop = getLevelDocument(building, level), height = getWallHeight(shop), floor = new THREE.Group();
@@ -184,6 +154,7 @@ function buildAuthoredLevel(building: ShopDocument, level: number, options: { sh
   floor.name = `${prefix}-level:${level + 1}`; floor.position.y = base; floor.userData.level = level; floor.userData.floorY = base;
   const room = buildRoom({ ...shop, wallColor: options.exterior ? facade.wallColor : shop.wallColor, exterior: facade }, {
     ...(level > 0 ? { slabDepth: LEVEL_SLAB } : {}), floorOpenings: getStairOpenings(building, level),
+    enclosed: options.exterior, hasEntrance: level === 0,
   });
   room.group.name = `${prefix}-room`; floor.add(room.group);
   if (level > 0) floor.add(buildStairwellRims(building, level));
@@ -193,7 +164,6 @@ function buildAuthoredLevel(building: ShopDocument, level: number, options: { sh
         object.material.color.set(facade.trimColor);
       }
     });
-    if (room.hasFloor) closeCutawayWalls(floor, shop, level === 0, facade.wallColor, facade.trimColor);
   }
   if (level > 0) disposeGroup(room.entrance);
   for (const item of getWallItems(shop)) {

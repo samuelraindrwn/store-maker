@@ -26,11 +26,19 @@ export function buildBuildingFurniture(item: ShopItem, floorRise = 2.99): THREE.
     for (let step = 0; step < steps; step++) {
       const h = (step + 1) * floorRise / steps;
       const z = 1.35 - (step + 0.5) * tread;
-      box(group, 'stair-riser', 1.7, h, tread + 0.006, color, 0, h / 2, z);
-      box(group, 'stair-tread', 1.77, 0.045, tread + 0.025, '#e9d2ac', 0, h + 0.0225, z);
+      // Open risers and thin wooden steps reveal the space beneath the flight.
+      box(group, 'stair-step', 1.76, 0.075, tread + 0.035, color, 0, h - 0.0375, z);
+      box(group, 'stair-tread', 1.80, 0.018, tread + 0.055, '#e9d2ac', 0, h + 0.009, z);
       for (const x of [-0.91, 0.91]) if (step % 2 === 0 || step === steps - 1) {
         box(group, 'stair-baluster', 0.04, 0.72, 0.04, '#746a65', x, h + 0.36, z);
       }
+    }
+    for (const x of [-0.70, 0.70]) {
+      const from = new THREE.Vector3(x, floorRise / steps - 0.09, 1.35 - tread / 2);
+      const to = new THREE.Vector3(x, floorRise - 0.09, -1.35 + tread / 2);
+      const stringer = box(group, 'stair-stringer', 0.11, to.distanceTo(from), 0.14, color);
+      stringer.position.copy(from).add(to).multiplyScalar(0.5);
+      stringer.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.sub(from).normalize());
     }
     for (const x of [-0.91, 0.91]) {
       const from = new THREE.Vector3(x, floorRise / steps + 0.75, 1.35 - tread / 2);

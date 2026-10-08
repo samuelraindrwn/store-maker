@@ -216,7 +216,7 @@ describe('resized wall accessories', () => {
     const item = accessory('window', { width: 5, sizeHeight: 1.2, offset: 3, height: 1.5 })
     const doc = placeWallItem(createEmptyShop(), item)
     const resized = resizeShop(doc, 4, 6)!
-    expect(resized.wallItems![0]).toMatchObject({ id: item.id, wall: 'left', width: 5, sizeHeight: 1.2 })
+    expect(resized.wallItems![0]).toMatchObject({ id: item.id, wall: 'right', width: 5, sizeHeight: 1.2 })
     expectValid(resized)
     expect(resizeShop(doc, 4, 4)).toBeNull()
     const strip = { ...createEmptyShop(), floorCells: [{ x: 0, z: 0 }, { x: 1, z: 0 }, { x: 2, z: 0 }] }

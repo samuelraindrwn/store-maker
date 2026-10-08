@@ -1,15 +1,16 @@
 export type ItemKind = 'shelf' | 'table' | 'counter' | 'rack' | 'plant' | 'rug' | 'lamp' | 'stool' | 'chalkboard' | 'poster-stand' | 'direction-sign'
   | 'glass-cabinet' | 'display-plinth' | 'pegboard' | 'food-display' | 'drinks-fridge' | 'coffee-station' | 'prep-counter' | 'stove' | 'sink' | 'dining-table' | 'service-cart'
-  | 'stairs' | 'warehouse-rack' | 'bathroom'
+  | 'stairs' | 'warehouse-rack' | 'bathroom' | 'toilet' | 'washbasin' | 'shower'
 export type ProductKind = 'books' | 'ceramics' | 'plants' | 'fashion' | 'vinyl' | 'shoes' | 'bags' | 'skincare' | 'toys'
   | 'bread' | 'pastries' | 'drinks' | 'fruit' | 'meals' | 'snacks' | 'none'
 export type Rotation = 0 | 90 | 180 | 270
 export type WallItemKind = 'window' | 'wall-lamp' | 'wall-shelf' | 'painting' | 'wall-sign'
 export type WindowStyle = 'classic' | 'picture' | 'grid' | 'sliding' | 'arched'
+export type WallSide = 'back' | 'left' | 'front' | 'right'
 export interface WallItem {
   id: string
   kind: WallItemKind
-  wall: 'back' | 'left'
+  wall: WallSide
   line: number
   offset: number
   height: number
@@ -20,7 +21,7 @@ export interface WallItem {
   sizeHeight?: number
   windowStyle?: WindowStyle
 }
-export interface WallRun { wall: 'back' | 'left'; line: number; start: number; end: number }
+export interface WallRun { wall: WallSide; line: number; start: number; end: number }
 export interface WallCatalogEntry {
   kind: WallItemKind
   name: string
@@ -31,7 +32,10 @@ export interface WallCatalogEntry {
   color: string
 }
 
-export interface Entrance { position: number; open: boolean; rotation?: Rotation }
+export interface Entrance { position: number; open: boolean; rotation?: Rotation; wall?: WallSide }
+/** Coordinates follow the floor grid: x runs along X at fixed Z; z runs along Z at fixed X. */
+export interface PartitionWall { id: string; axis: 'x' | 'z'; line: number; start: number; end: number; color: string }
+export interface InteriorDoor { id: string; wallId: string; offset: number; width: number; color: string; open: boolean }
 export interface FloorCell { x: number; z: number }
 export const MIN_FLOOR_COORD = -8
 export const MAX_FLOOR_COORD = 15
@@ -60,6 +64,8 @@ export interface ShopDocument {
   entrance?: Entrance
   floorCells?: FloorCell[]
   wallItems?: WallItem[]
+  partitions?: PartitionWall[]
+  interiorDoors?: InteriorDoor[]
   /** Floors above the ground floor, ordered from level two through four. */
   upperFloors?: ShopDocument[]
   roof?: RoofDesign
@@ -106,6 +112,9 @@ export const CATALOG: CatalogEntry[] = [
   { kind: 'stairs', name: 'Tangga', description: 'Tangga dengan pegangan untuk menghubungkan lantai toko.', width: 2, depth: 3, color: '#BB9775', stockable: false },
   { kind: 'warehouse-rack', name: 'Rak gudang', description: 'Rak penyimpanan tinggi dengan kardus stok yang tertata rapi.', width: 2, depth: 1, color: '#7E9E9C', stockable: false },
   { kind: 'bathroom', name: 'WC / kamar mandi', description: 'Kamar mandi kecil dengan toilet, wastafel, dan dinding privasi.', width: 2, depth: 2, color: '#B4CDC8', stockable: false },
+  { kind: 'toilet', name: 'Toilet', description: 'Toilet terpisah untuk kamar mandi yang kamu tata sendiri.', width: 1, depth: 1, color: '#F4F0E5', stockable: false },
+  { kind: 'washbasin', name: 'Wastafel', description: 'Wastafel ringkas untuk mencuci tangan.', width: 1, depth: 1, color: '#A9BEAD', stockable: false },
+  { kind: 'shower', name: 'Shower', description: 'Area shower yang bisa ditempatkan dan diputar sendiri.', width: 1, depth: 1, color: '#A8C7C3', stockable: false },
 ]
 
 export const FOOD_ITEM_KINDS: readonly ItemKind[] = Object.freeze([
@@ -147,13 +156,18 @@ const itemKeys = ['id', 'kind', 'x', 'z', 'rotation', 'color', 'stock'] as const
 const optionalItemKeys = ['width', 'depth'] as const
 const allowedItemKeys = [...itemKeys, ...optionalItemKeys] as const
 const documentKeys = ['version', 'name', 'width', 'depth', 'wallColor', 'floorColor', 'items'] as const
-const optionalDocumentKeys = ['wallHeight', 'entrance', 'floorCells', 'wallItems'] as const
+const optionalDocumentKeys = ['wallHeight', 'entrance', 'floorCells', 'wallItems', 'partitions', 'interiorDoors'] as const
 const buildingDocumentKeys = ['upperFloors', 'roof', 'exterior'] as const
 const wallItemKeys = ['id', 'kind', 'wall', 'line', 'offset', 'height', 'color', 'text', 'lit'] as const
 const optionalWallItemKeys = ['width', 'sizeHeight', 'windowStyle'] as const
 const allowedWallItemKeys = [...wallItemKeys, ...optionalWallItemKeys] as const
 const MAX_WALL_ITEMS = 60
 const MAX_ITEMS = 200
+const MAX_PARTITIONS = 80
+const MAX_INTERIOR_DOORS = 80
+const partitionKeys = ['id', 'axis', 'line', 'start', 'end', 'color'] as const
+const interiorDoorKeys = ['id', 'wallId', 'offset', 'width', 'color', 'open'] as const
+const wallSides: readonly WallSide[] = ['back', 'left', 'front', 'right']
 const MAX_JSON_LENGTH = 128_000 * MAX_LEVELS
 const own = (object: object, key: PropertyKey) => Object.prototype.hasOwnProperty.call(object, key)
 
@@ -204,10 +218,11 @@ function isWallHeight(value: unknown): value is number {
 }
 
 function isEntrance(value: unknown): value is Entrance {
-  return isRecord(value) && (exactKeys(value, ['position', 'open']) || exactKeys(value, ['position', 'open', 'rotation']))
+  return isRecord(value) && keysWithOptional(value, ['position', 'open'], ['rotation', 'wall'])
     && typeof value.position === 'number' && Number.isFinite(value.position)
     && value.position >= 0 && value.position <= 1 && typeof value.open === 'boolean'
     && (!own(value, 'rotation') || (typeof value.rotation === 'number' && rotations.includes(value.rotation)))
+    && (!own(value, 'wall') || wallSides.includes(value.wall as WallSide))
 }
 
 function isFloorCell(value: unknown): value is FloorCell {
@@ -248,17 +263,25 @@ export function getItemPlacementBounds(doc: ShopDocument, kind: ItemKind): { min
   return { minX, maxX, minZ, maxZ: isStandingSign(kind) && doc.floorCells?.length !== 0 ? Math.min(MAX_FLOOR_COORD, maxZ + 2) : maxZ }
 }
 
+export function wallIsHorizontal(wall: WallSide): boolean { return wall === 'back' || wall === 'front' }
+export function getWallSideLabel(wall: WallSide): string {
+  return { back: 'Belakang', left: 'Kiri', front: 'Depan', right: 'Kanan' }[wall]
+}
+
 export function getWallRuns(doc: ShopDocument): WallRun[] {
   const cells = getFloorCells(doc)
   const occupied = new Set(cells.map(cell => `${cell.x},${cell.z}`))
   const result: WallRun[] = []
-  for (const wall of ['back', 'left'] as const) {
+  for (const wall of wallSides) {
     const lines = new Map<number, number[]>()
+    const horizontal = wallIsHorizontal(wall)
+    const dx = wall === 'left' ? -1 : wall === 'right' ? 1 : 0
+    const dz = wall === 'back' ? -1 : wall === 'front' ? 1 : 0
     for (const cell of cells) {
-      if (occupied.has(wall === 'back' ? `${cell.x},${cell.z - 1}` : `${cell.x - 1},${cell.z}`)) continue
-      const line = wall === 'back' ? cell.z : cell.x
+      if (occupied.has(`${cell.x + dx},${cell.z + dz}`)) continue
+      const line = horizontal ? cell.z + (dz > 0 ? 1 : 0) : cell.x + (dx > 0 ? 1 : 0)
       const values = lines.get(line) ?? []
-      values.push(wall === 'back' ? cell.x : cell.z)
+      values.push(horizontal ? cell.x : cell.z)
       lines.set(line, values)
     }
     for (const [line, values] of [...lines].sort(([a], [b]) => a - b)) {
@@ -282,8 +305,8 @@ function isWallItem(value: unknown): value is WallItem {
   if (own(value, 'windowStyle') && (value.kind !== 'window' || typeof value.windowStyle !== 'string' || !windowStyles.has(value.windowStyle))) return false
   return typeof value.id === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(value.id)
     && typeof value.kind === 'string' && own(wallCatalogByKind, value.kind)
-    && (value.wall === 'back' || value.wall === 'left')
-    && typeof value.line === 'number' && Number.isInteger(value.line) && value.line >= MIN_FLOOR_COORD && value.line <= MAX_FLOOR_COORD
+    && wallSides.includes(value.wall as WallSide)
+    && typeof value.line === 'number' && Number.isInteger(value.line) && value.line >= MIN_FLOOR_COORD && value.line <= MAX_FLOOR_COORD + 1
     && typeof value.offset === 'number' && Number.isFinite(value.offset) && value.offset >= MIN_FLOOR_COORD && value.offset <= MAX_FLOOR_COORD + 1
     && typeof value.height === 'number' && Number.isFinite(value.height) && value.height > 0 && value.height <= 4.5
     && isColor(value.color) && typeof value.text === 'string' && value.text.length <= 80 && !/[\u0000-\u001f\u007f]/.test(value.text)
@@ -301,6 +324,155 @@ export function getWindowStyle(item: WallItem): WindowStyle {
   return item.windowStyle ?? 'classic'
 }
 
+const validId = (value: unknown): value is string => typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(value)
+const gridCoordinate = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= MIN_FLOOR_COORD && value <= MAX_FLOOR_COORD + 1
+const layoutId = (prefix: string) => globalThis.crypto?.randomUUID?.() ?? `${prefix}-${Date.now().toString(36)}-${(++fallbackId).toString(36)}`
+
+export function getPartitions(doc: ShopDocument): PartitionWall[] { return doc.partitions?.map(wall => ({ ...wall })) ?? [] }
+export function getInteriorDoors(doc: ShopDocument): InteriorDoor[] { return doc.interiorDoors?.map(door => ({ ...door })) ?? [] }
+
+function isPartition(value: unknown): value is PartitionWall {
+  return isRecord(value) && exactKeys(value, partitionKeys) && validId(value.id) && (value.axis === 'x' || value.axis === 'z')
+    && gridCoordinate(value.line) && gridCoordinate(value.start) && gridCoordinate(value.end) && value.end > value.start && isColor(value.color)
+}
+
+function isInteriorDoor(value: unknown): value is InteriorDoor {
+  return isRecord(value) && exactKeys(value, interiorDoorKeys) && validId(value.id) && validId(value.wallId)
+    && typeof value.offset === 'number' && Number.isFinite(value.offset) && value.offset >= MIN_FLOOR_COORD && value.offset <= MAX_FLOOR_COORD + 1
+    && typeof value.width === 'number' && Number.isFinite(value.width) && value.width >= 0.6 && value.width <= 2.4
+    && isColor(value.color) && typeof value.open === 'boolean'
+}
+
+function partitionCrossesItem(wall: PartitionWall, item: ShopItem): boolean {
+  if (item.kind === 'rug') return false
+  const size = getItemFootprint(item)
+  return wall.axis === 'x'
+    ? wall.line > item.z && wall.line < item.z + size.depth && wall.start < item.x + size.width && wall.end > item.x
+    : wall.line > item.x && wall.line < item.x + size.width && wall.start < item.z + size.depth && wall.end > item.z
+}
+
+export function getPartitionPosition(doc: ShopDocument, wall: PartitionWall): { x: number; z: number; rotation: number; length: number } {
+  return { x: (wall.axis === 'x' ? (wall.start + wall.end) / 2 : wall.line) - doc.width / 2,
+    z: (wall.axis === 'z' ? (wall.start + wall.end) / 2 : wall.line) - doc.depth / 2,
+    rotation: wall.axis === 'x' ? 0 : Math.PI / 2, length: wall.end - wall.start }
+}
+
+export function getInteriorDoorSize(doc: ShopDocument, door: InteriorDoor): { width: number; height: number; depth: number } {
+  return { width: door.width, height: Math.min(2.1, getWallHeight(doc) - 0.1), depth: 0.14 }
+}
+
+export function getInteriorDoorPosition(doc: ShopDocument, door: InteriorDoor): { x: number; z: number; rotation: number } | null {
+  const wall = doc.partitions?.find(wall => wall.id === door.wallId)
+  if (!wall) return null
+  return { x: (wall.axis === 'x' ? door.offset : wall.line) - doc.width / 2,
+    z: (wall.axis === 'z' ? door.offset : wall.line) - doc.depth / 2, rotation: wall.axis === 'x' ? 0 : Math.PI / 2 }
+}
+
+export function canPlaceInteriorDoor(doc: ShopDocument, door: InteriorDoor, ignoreId?: string): boolean {
+  if (!isInteriorDoor(door) || doc.items.some(item => item.id === door.id) || getWallItems(doc).some(item => item.id === door.id)
+    || doc.partitions?.some(wall => wall.id === door.id)) return false
+  const wall = doc.partitions?.find(wall => wall.id === door.wallId)
+  if (!wall || door.offset - door.width / 2 < wall.start - 0.000001 || door.offset + door.width / 2 > wall.end + 0.000001) return false
+  if (doc.interiorDoors?.some(other => other.id !== ignoreId && (other.id === door.id
+    || (other.wallId === door.wallId && Math.abs(other.offset - door.offset) < (other.width + door.width) / 2 - 0.000001)))) return false
+  return !(doc.partitions ?? []).some(other => other.axis !== wall.axis
+    && other.start < wall.line + 0.000001 && other.end > wall.line - 0.000001
+    && other.line > door.offset - door.width / 2 - 0.000001 && other.line < door.offset + door.width / 2 + 0.000001)
+}
+
+export function canPlacePartition(doc: ShopDocument, wall: PartitionWall, ignoreId?: string): boolean {
+  if (!isPartition(wall) || doc.items.some(item => item.id === wall.id) || getWallItems(doc).some(item => item.id === wall.id)
+    || doc.interiorDoors?.some(door => door.id === wall.id)) return false
+  if (doc.partitions?.some(other => other.id !== ignoreId && (other.id === wall.id
+    || (other.axis === wall.axis && other.line === wall.line && other.start < wall.end && other.end > wall.start)))) return false
+  for (let along = wall.start; along < wall.end; along++) {
+    if (wall.axis === 'x' ? !hasFloorCell(doc, along, wall.line - 1) || !hasFloorCell(doc, along, wall.line)
+      : !hasFloorCell(doc, wall.line - 1, along) || !hasFloorCell(doc, wall.line, along)) return false
+  }
+  if (doc.items.some(item => partitionCrossesItem(wall, item))) return false
+  const candidate = { ...doc, partitions: [...(doc.partitions ?? []).filter(other => other.id !== ignoreId), wall] }
+  return (doc.interiorDoors ?? []).every(door => canPlaceInteriorDoor(candidate, door, door.id))
+}
+
+export function findPartitionPlacement(doc: ShopDocument, preferred: Partial<PartitionWall> = {}): PartitionWall | null {
+  if (!isRecord(preferred) || Reflect.ownKeys(preferred).some(key => typeof key !== 'string' || !partitionKeys.includes(key as typeof partitionKeys[number]))) return null
+  const wanted: PartitionWall = { id: layoutId('partition'), axis: 'z', line: Math.round(doc.width / 2), start: 1, end: 4, color: doc.wallColor, ...preferred }
+  if (!isPartition(wanted)) return null
+  if (canPlacePartition(doc, wanted, wanted.id)) return wanted
+  const length = wanted.end - wanted.start, bounds = getFloorBounds(doc)
+  const candidates: PartitionWall[] = []
+  for (const axis of [wanted.axis, wanted.axis === 'x' ? 'z' : 'x'] as const) {
+    const minLine = (axis === 'x' ? bounds.minZ : bounds.minX) + 1, maxLine = axis === 'x' ? bounds.maxZ : bounds.maxX
+    const minAlong = axis === 'x' ? bounds.minX : bounds.minZ, maxAlong = (axis === 'x' ? bounds.maxX : bounds.maxZ) + 1
+    for (let span = length; span >= 1; span--) for (let line = minLine; line <= maxLine; line++) for (let start = minAlong; start + span <= maxAlong; start++) {
+      candidates.push({ ...wanted, axis, line, start, end: start + span })
+    }
+  }
+  candidates.sort((a, b) => ((a.axis === wanted.axis ? 0 : 1000) + Math.abs(a.end - a.start - length) * 100 + Math.abs(a.line - wanted.line) + Math.abs(a.start - wanted.start))
+    - ((b.axis === wanted.axis ? 0 : 1000) + Math.abs(b.end - b.start - length) * 100 + Math.abs(b.line - wanted.line) + Math.abs(b.start - wanted.start)))
+  return candidates.find(wall => canPlacePartition(doc, wall, wall.id)) ?? null
+}
+
+export function createPartition(doc: ShopDocument): PartitionWall | null { return findPartitionPlacement(doc) }
+
+export function placePartition(doc: ShopDocument, wall: PartitionWall): ShopDocument {
+  if ((doc.partitions?.length ?? 0) >= MAX_PARTITIONS || !canPlacePartition(doc, wall)) return doc
+  return { ...doc, partitions: [...getPartitions(doc), { ...wall }] }
+}
+
+export function updatePartition(doc: ShopDocument, id: string, patch: Partial<PartitionWall>): ShopDocument {
+  const current = doc.partitions?.find(wall => wall.id === id)
+  if (!current || !isRecord(patch) || Reflect.ownKeys(patch).some(key => typeof key !== 'string' || !partitionKeys.includes(key as typeof partitionKeys[number]))
+    || (own(patch, 'id') && patch.id !== id)) return doc
+  const candidate = { ...current, ...patch }
+  if (!canPlacePartition(doc, candidate, id) || partitionKeys.every(key => candidate[key] === current[key])) return doc
+  return { ...doc, partitions: doc.partitions!.map(wall => wall.id === id ? candidate : wall) }
+}
+
+export function removePartition(doc: ShopDocument, id: string): ShopDocument {
+  if (!doc.partitions?.some(wall => wall.id === id)) return doc
+  return { ...doc, partitions: doc.partitions.filter(wall => wall.id !== id),
+    ...(doc.interiorDoors ? { interiorDoors: doc.interiorDoors.filter(door => door.wallId !== id) } : {}) }
+}
+
+export function createInteriorDoor(doc: ShopDocument, wallId: string): InteriorDoor | null {
+  const wall = doc.partitions?.find(wall => wall.id === wallId)
+  if (!wall) return null
+  const width = Math.min(1, wall.end - wall.start), id = layoutId('door')
+  const offsets = Array.from({ length: Math.floor((wall.end - wall.start - width) * 10) + 1 }, (_, index) => wall.start + width / 2 + index / 10)
+    .sort((a, b) => Math.abs(a - (wall.start + wall.end) / 2) - Math.abs(b - (wall.start + wall.end) / 2))
+  for (const offset of offsets) {
+    const door: InteriorDoor = { id, wallId, offset: snapWall(offset), width, color: '#B697B8', open: false }
+    if (canPlaceInteriorDoor(doc, door)) return door
+  }
+  return null
+}
+
+export function placeInteriorDoor(doc: ShopDocument, door: InteriorDoor): ShopDocument {
+  if ((doc.interiorDoors?.length ?? 0) >= MAX_INTERIOR_DOORS || !canPlaceInteriorDoor(doc, door)) return doc
+  return { ...doc, interiorDoors: [...getInteriorDoors(doc), { ...door }] }
+}
+
+export function updateInteriorDoor(doc: ShopDocument, id: string, patch: Partial<InteriorDoor>): ShopDocument {
+  const current = doc.interiorDoors?.find(door => door.id === id)
+  if (!current || !isRecord(patch) || Reflect.ownKeys(patch).some(key => typeof key !== 'string' || !interiorDoorKeys.includes(key as typeof interiorDoorKeys[number]))
+    || (own(patch, 'id') && patch.id !== id)) return doc
+  const candidate = { ...current, ...patch }
+  if (!isInteriorDoor(candidate)) return doc
+  candidate.offset = snapWall(candidate.offset); candidate.width = snapWall(candidate.width)
+  if (!canPlaceInteriorDoor(doc, candidate, id) || interiorDoorKeys.every(key => candidate[key] === current[key])) return doc
+  return { ...doc, interiorDoors: doc.interiorDoors!.map(door => door.id === id ? candidate : door) }
+}
+
+export function removeInteriorDoor(doc: ShopDocument, id: string): ShopDocument {
+  return doc.interiorDoors?.some(door => door.id === id) ? { ...doc, interiorDoors: doc.interiorDoors.filter(door => door.id !== id) } : doc
+}
+
+function validPartitions(doc: ShopDocument): boolean {
+  return (doc.partitions ?? []).every(wall => canPlacePartition(doc, wall, wall.id))
+    && (doc.interiorDoors ?? []).every(door => canPlaceInteriorDoor(doc, door, door.id))
+}
+
 function wallItemsOverlap(a: WallItem, b: WallItem): boolean {
   if (a.wall !== b.wall || a.line !== b.line) return false
   const first = getWallItemSize(a)
@@ -310,7 +482,8 @@ function wallItemsOverlap(a: WallItem, b: WallItem): boolean {
 }
 
 function fitsWallItem(doc: ShopDocument, item: WallItem, existing: WallItem[], runs: WallRun[], ignoreId?: string): boolean {
-  if (!isWallItem(item) || doc.items.some(furniture => furniture.id === item.id)) return false
+  if (!isWallItem(item) || doc.items.some(furniture => furniture.id === item.id)
+    || doc.partitions?.some(wall => wall.id === item.id) || doc.interiorDoors?.some(door => door.id === item.id)) return false
   const size = getWallItemSize(item)
   if (item.height - size.height / 2 < -0.000001 || item.height + size.height / 2 > getWallHeight(doc) + 0.000001) return false
   if (!runs.some(run => run.wall === item.wall && run.line === item.line
@@ -319,9 +492,14 @@ function fitsWallItem(doc: ShopDocument, item: WallItem, existing: WallItem[], r
 }
 
 export function wallItemPosition(doc: ShopDocument, item: WallItem): { x: number; y: number; z: number; rotation: number } {
-  return item.wall === 'back'
-    ? { x: item.offset - doc.width / 2, y: item.height, z: item.line - doc.depth / 2 + 0.012, rotation: 0 }
-    : { x: item.line - doc.width / 2 + 0.012, y: item.height, z: item.offset - doc.depth / 2, rotation: Math.PI / 2 }
+  const horizontal = wallIsHorizontal(item.wall)
+  const inward = item.wall === 'back' || item.wall === 'left' ? 0.012 : -0.012
+  return {
+    x: horizontal ? item.offset - doc.width / 2 : item.line - doc.width / 2 + inward,
+    y: item.height,
+    z: horizontal ? item.line - doc.depth / 2 + inward : item.offset - doc.depth / 2,
+    rotation: { back: 0, left: Math.PI / 2, front: Math.PI, right: -Math.PI / 2 }[item.wall],
+  }
 }
 
 export function createWallItem(kind: WallItemKind, shopName = 'Toko Kecilku'): WallItem {
@@ -385,7 +563,8 @@ function snapWallItem(item: WallItem): WallItem {
 export function findWallPlacement(doc: ShopDocument, item: WallItem, preferred: Partial<WallItem> = {}): WallItem | null {
   if (!isRecord(preferred) || Reflect.ownKeys(preferred).some(key => typeof key !== 'string' || !allowedWallItemKeys.includes(key as typeof allowedWallItemKeys[number]))) return null
   const proposed = { ...item, ...preferred, id: item.id }
-  if (!isWallItem(proposed) || doc.items.some(furniture => furniture.id === proposed.id)) return null
+  if (!isWallItem(proposed) || doc.items.some(furniture => furniture.id === proposed.id)
+    || doc.partitions?.some(wall => wall.id === proposed.id) || doc.interiorDoors?.some(door => door.id === proposed.id)) return null
   const wanted = snapWallItem(proposed)
   const existing = getWallItems(doc).filter(other => other.id !== wanted.id)
   const size = getWallItemSize(wanted)
@@ -405,7 +584,7 @@ export function findWallPlacement(doc: ShopDocument, item: WallItem, preferred: 
     const firstOffset = Math.ceil((run.start + size.width / 2 - 0.000001) * 10)
     const lastOffset = Math.floor((run.end - size.width / 2 + 0.000001) * 10)
     if (lastOffset < firstOffset) continue
-    const axis = run.wall === 'back' ? target.x + doc.width / 2 : target.z + doc.depth / 2
+    const axis = wallIsHorizontal(run.wall) ? target.x + doc.width / 2 : target.z + doc.depth / 2
     const offsets = Array.from({ length: lastOffset - firstOffset + 1 }, (_, i) => (firstOffset + i) / 10)
       .sort((a, b) => Math.abs(a - axis) - Math.abs(b - axis))
     const onWall = existing.filter(other => other.wall === run.wall && other.line === run.line)
@@ -515,7 +694,7 @@ export function paintFloor(doc: ShopDocument, stroke: FloorCell[], operation: 'a
     }
     if (!changed) continue
     const withSigns = reconcileStandingSigns({ ...current, version: cells.size === 0 ? 2 : current.version, floorCells: [...cells.values()].sort((a,b) => a.z - b.z || a.x - b.x) })
-    const candidate = withSigns ? reconcileWallItems(current, withSigns) : null
+    const candidate = withSigns && validPartitions(withSigns) ? reconcileWallItems(current, withSigns) : null
     if (candidate) current = candidate
     else if (operation === 'add') cells.delete(key)
     else cells.set(key, { ...cell })
@@ -523,31 +702,27 @@ export function paintFloor(doc: ShopDocument, stroke: FloorCell[], operation: 'a
   return current
 }
 
-/** Find a front-facing boundary run for the actual floor contour, including L shapes. */
+/** Find the selected facade on the actual contour, including concave and shifted floors. */
 export function getEntranceAnchor(doc: ShopDocument): { x: number; z: number; width: number } {
   const bounds = getFloorBounds(doc)
-  const rows = new Map<number, number[]>()
-  for (const cell of getFloorCells(doc)) {
-    if (hasFloorCell(doc, cell.x, cell.z + 1)) continue
-    const row = rows.get(cell.z) ?? []; row.push(cell.x); rows.set(cell.z, row)
+  const wall = getEntranceWall(doc), horizontal = wallIsHorizontal(wall)
+  const span = horizontal ? bounds.width : bounds.depth, min = horizontal ? bounds.minX : bounds.minZ
+  const outer = { front: bounds.maxZ + 1, back: bounds.minZ, right: bounds.maxX + 1, left: bounds.minX }[wall]
+  const margin = Math.min(1.1, span / 2)
+  const desired = min + margin + getEntrance(doc).position * Math.max(0, span - 2 * margin)
+  let best = { offset: desired, line: outer, width: 1.84, cost: Infinity }
+  for (const run of getWallRuns(doc).filter(run => run.wall === wall)) {
+    const length = run.end - run.start, inset = Math.min(1.1, length / 2)
+    const offset = Math.max(run.start + inset, Math.min(run.end - inset, desired))
+    const cost = Math.abs(offset - desired) + Math.abs(outer - run.line) * 0.001
+    if (cost < best.cost) best = { offset, line: run.line, width: length >= 2 ? 1.84 : 0.85, cost }
   }
-  const margin = Math.min(1.1, bounds.width / 2)
-  const desired = bounds.minX + margin + getEntrance(doc).position * Math.max(0, bounds.width - 2 * margin)
-  let best = { x: desired, z: bounds.maxZ + 1, width: 1.84, cost: Infinity }
-  for (const [z, values] of rows) {
-    const xs = values.sort((a,b) => a-b)
-    for (let start = 0; start < xs.length;) {
-      let end = start
-      while (end + 1 < xs.length && xs[end + 1] === xs[end] + 1) end++
-      const length = xs[end] - xs[start] + 1
-      const inset = Math.min(1.1, length / 2)
-      const x = Math.max(xs[start] + inset, Math.min(xs[end] + 1 - inset, desired))
-      const cost = Math.abs(x - desired) + (bounds.maxZ - z) * 0.001
-      if (cost < best.cost) best = { x, z: z + 1, width: length >= 2 ? 1.84 : 0.85, cost }
-      start = end + 1
-    }
+  const outward = wall === 'front' || wall === 'right' ? 0.09 : -0.09
+  return {
+    x: horizontal ? best.offset - doc.width / 2 : best.line - doc.width / 2 + outward,
+    z: horizontal ? best.line - doc.depth / 2 + outward : best.offset - doc.depth / 2,
+    width: best.width,
   }
-  return { x: best.x - doc.width / 2, z: best.z - doc.depth / 2 + 0.09, width: best.width }
 }
 
 export function getWallHeight(doc: ShopDocument): number { return doc.wallHeight ?? 2.75 }
@@ -556,9 +731,12 @@ export function getEntrance(doc: ShopDocument): Entrance {
   return doc.entrance ? { ...doc.entrance } : { position: 0.72, open: false }
 }
 
-/** The whole entrance orientation, independent from its door leaf opening. */
+export function getEntranceWall(doc: ShopDocument): WallSide { return doc.entrance?.wall ?? 'front' }
+
+/** Effective world-facing rotation; saved rotation remains relative to the selected facade. */
 export function getEntranceRotation(doc: ShopDocument): Rotation {
-  return doc.entrance?.rotation ?? 0
+  const facing = { front: 0, right: 270, back: 180, left: 90 }[getEntranceWall(doc)]
+  return ((facing + (doc.entrance?.rotation ?? 0)) % 360) as Rotation
 }
 
 export function setWallHeight(doc: ShopDocument, height: number): ShopDocument {
@@ -568,12 +746,15 @@ export function setWallHeight(doc: ShopDocument, height: number): ShopDocument {
 }
 
 export function setEntrance(doc: ShopDocument, patch: Partial<Entrance>): ShopDocument {
-  if (!isRecord(patch) || Reflect.ownKeys(patch).some(key => key !== 'position' && key !== 'open' && key !== 'rotation')) return doc
+  if (!isRecord(patch) || Reflect.ownKeys(patch).some(key => key !== 'position' && key !== 'open' && key !== 'rotation' && key !== 'wall')) return doc
   const current = getEntrance(doc)
-  const next = { ...current, ...patch }
+  const next = { ...current, ...patch,
+    ...(patch.wall !== undefined && patch.wall !== getEntranceWall(doc) && patch.rotation === undefined ? { rotation: 0 as Rotation } : {}),
+  }
   if (!isEntrance(next)) return doc
   const position = Math.round(next.position * 1000) / 1000
-  if (current.position === position && current.open === next.open && (current.rotation ?? 0) === (next.rotation ?? 0)) return doc
+  if (current.position === position && current.open === next.open && (current.rotation ?? 0) === (next.rotation ?? 0)
+    && (current.wall ?? 'front') === (next.wall ?? 'front')) return doc
   return { ...doc, entrance: { ...next, position } }
 }
 
@@ -624,6 +805,8 @@ export function canPlace(doc: ShopDocument, item: ShopItem, ignoreId?: string): 
   if (!isDimension(doc.width) || !isDimension(doc.depth) || !Array.isArray(doc.items) || !isItem(item)) return false
   if (doc.floorCells?.length === 0) return false
   if (doc.wallItems?.some(accessory => accessory.id === item.id)) return false
+  if (doc.partitions?.some(wall => wall.id === item.id || partitionCrossesItem(wall, item))
+    || doc.interiorDoors?.some(door => door.id === item.id)) return false
   const footprint = getItemFootprint(item)
   const bounds = isStandingSign(item.kind) ? getFloorBounds(doc) : null
   let allFloor = true
@@ -790,29 +973,38 @@ export function createInitialShop(): ShopDocument {
   })
   const shop: ShopDocument = {
     ...createEmptyShop(),
-    name: 'Sudut Cerita',
+    name: 'Sudut Cerita', width: 10, depth: 9,
+    entrance: { position: 0.5, open: false },
     items: [
-      make('welcome-rug', 'rug', 2, 3),
-      make('bookshelf', 'shelf', 0, 0, { stock: 'books' }),
-      make('ceramic-shelf', 'shelf', 2, 0, { color: '#B498C4', stock: 'ceramics' }),
-      make('warm-lamp', 'lamp', 4, 0),
-      make('fashion-rack', 'rack', 5, 0),
-      make('display-table', 'table', 3, 2),
-      make('checkout', 'counter', 0, 4),
-      make('little-seat', 'stool', 2, 4),
-      make('green-corner', 'plant', 0, 5),
-      make('front-plant', 'plant', 6, 5, { color: '#B797C8' }),
-      make('ground-stairs', 'stairs', 0, 1),
-      make('ground-bathroom', 'bathroom', 5, 1),
+      make('welcome-rug', 'rug', 4, 6),
+      make('bookshelf', 'shelf', 3, 0, { stock: 'books' }),
+      make('ceramic-shelf', 'shelf', 5, 0, { color: '#B498C4', stock: 'ceramics' }),
+      make('warm-lamp', 'lamp', 9, 7),
+      make('fashion-rack', 'rack', 7, 6),
+      make('display-table', 'table', 4, 4),
+      make('checkout', 'counter', 1, 7),
+      make('little-seat', 'stool', 1, 6),
+      make('green-corner', 'plant', 0, 8),
+      make('front-plant', 'plant', 9, 8, { color: '#B797C8' }),
+      make('ground-stairs', 'stairs', 0, 1, { depth: 4 }),
+      make('ground-toilet', 'toilet', 7, 0),
+      make('ground-shower', 'shower', 9, 0),
+      make('ground-washbasin', 'washbasin', 9, 2, { rotation: 90 }),
     ],
+    partitions: [
+      { id: 'wc-left-wall', axis: 'z', line: 7, start: 0, end: 3, color: '#D8E4DC' },
+      { id: 'wc-front-wall', axis: 'x', line: 3, start: 7, end: 10, color: '#D8E4DC' },
+    ],
+    interiorDoors: [{ id: 'wc-door', wallId: 'wc-front-wall', offset: 8.5, width: 1, color: '#B697B8', open: false }],
     upperFloors: [{
-      ...createEmptyShop(), name: 'Sudut Cerita', floorColor: '#D9CBB6',
+      ...createEmptyShop(), name: 'Sudut Cerita', width: 10, depth: 9, floorColor: '#D9CBB6',
       items: [
-        make('warehouse-rack-a', 'warehouse-rack', 0, 0),
-        make('warehouse-rack-b', 'warehouse-rack', 3, 0),
-        make('warehouse-rack-c', 'warehouse-rack', 5, 0),
-        make('warehouse-rack-d', 'warehouse-rack', 3, 3),
-        make('warehouse-rack-e', 'warehouse-rack', 5, 3),
+        make('warehouse-rack-a', 'warehouse-rack', 3, 0),
+        make('warehouse-rack-b', 'warehouse-rack', 6, 0),
+        make('warehouse-rack-c', 'warehouse-rack', 3, 3),
+        make('warehouse-rack-d', 'warehouse-rack', 6, 3),
+        make('warehouse-rack-e', 'warehouse-rack', 3, 6),
+        make('warehouse-rack-f', 'warehouse-rack', 6, 6),
       ],
     }],
     roof: { style: 'tiles', color: '#B96B51', garden: false },
@@ -849,7 +1041,7 @@ export function resizeShop(doc: ShopDocument, width: number, depth: number): Sho
   if (!isDimension(width) || !isDimension(depth)) return null
   if (doc.floorCells?.length && (doc.width !== width || doc.depth !== depth)) return null
   const candidate = reconcileStandingSigns({ ...doc, width, depth })
-  if (!candidate) return null
+  if (!candidate || !validPartitions(candidate)) return null
   return width === doc.width && depth === doc.depth ? doc : reconcileWallItems(doc, candidate)
 }
 
@@ -878,6 +1070,8 @@ function parseFloor(value: unknown, allowBuilding: boolean): ShopDocument | null
     if (own(value, 'wallHeight') && !isWallHeight(value.wallHeight)) return null
     if (own(value, 'entrance') && !isEntrance(value.entrance)) return null
     if (own(value, 'wallItems') && (!Array.isArray(value.wallItems) || value.wallItems.length > MAX_WALL_ITEMS)) return null
+    if (own(value, 'partitions') && (!Array.isArray(value.partitions) || value.partitions.length > MAX_PARTITIONS)) return null
+    if (own(value, 'interiorDoors') && (!Array.isArray(value.interiorDoors) || value.interiorDoors.length > MAX_INTERIOR_DOORS)) return null
     if (own(value, 'floorCells')) {
       if (!Array.isArray(value.floorCells) || (value.version === 1 && !value.floorCells.length) || value.floorCells.length > (MAX_FLOOR_COORD - MIN_FLOOR_COORD + 1) ** 2) return null
       const keys = new Set<string>()
@@ -897,9 +1091,26 @@ function parseFloor(value: unknown, allowBuilding: boolean): ShopDocument | null
     if (isWallHeight(value.wallHeight)) result.wallHeight = value.wallHeight
     if (isEntrance(value.entrance)) result.entrance = { ...value.entrance }
     if (Array.isArray(value.floorCells)) result.floorCells = (value.floorCells as FloorCell[]).map(cell => ({ ...cell }))
+    // An explicitly empty accessory list suppresses virtual legacy decorations
+    // while validating IDs in the new wall/door arrays too.
+    if (Array.isArray(value.wallItems)) result.wallItems = []
     for (const item of value.items) {
       if (!isItem(item) || !canPlace(result, item)) return null
       result.items.push({ ...item })
+    }
+    if (Array.isArray(value.partitions)) {
+      result.partitions = []
+      for (const wall of value.partitions) {
+        if (!isPartition(wall) || !canPlacePartition(result, wall)) return null
+        result.partitions.push({ ...wall })
+      }
+    }
+    if (Array.isArray(value.interiorDoors)) {
+      result.interiorDoors = []
+      for (const door of value.interiorDoors) {
+        if (!isInteriorDoor(door) || !canPlaceInteriorDoor(result, door)) return null
+        result.interiorDoors.push({ ...door })
+      }
     }
     if (Array.isArray(value.wallItems)) {
       result.wallItems = []

@@ -5,13 +5,14 @@ import { canPlaceWallItem, getWallItems, getWallItemSize, getWallRuns, updateWal
 import { applyItemSize, applyWallItemSize, buildCity, buildItem, buildRoom, buildWallItem, disposeGroup, standingSignGroundY, standingSignSupports } from './objects';
 import { makeBuildHandles, minimumSize, positionBuildHandles, type BuildHandleId, type Dimensions } from './interactionHandles';
 import { FloorPainter, floorOutline, strokeCells, workCells } from './interactionFloor';
-import { intersectWall, wallFrame } from './interactionWalls';
+import { intersectWall, intersectWallPlane, wallFrame } from './interactionWalls';
 import { ObjectResizeTools, resizeFloorEdge, resizeFloorToTile, resizeWallEdge, resizeWallToTile, type ResizeEdge } from './interactionObjectResize';
 import { getItemSupport } from './itemSupport';
 import { NightLighting } from './lighting';
 import { buildBuilding, buildInteriorContext, buildStairLandings, getBuildingBounds, getLevelBaseY, LEVEL_SLAB } from './buildingObjects';
 import { getStairOpenings } from './stairGeometry';
 import { getLevelCount, getLevelDocument, getRoof } from '../model';
+import { canPlacePartition, getEntranceWall, getInteriorDoors, getPartitions, getPartitionPosition, placePartition, wallIsHorizontal, type PartitionWall, type WallSide } from '../model';
 
 export type Cell = { x: number; z: number };
 export type CameraView = 'orbit' | 'top' | 'front';
@@ -23,13 +24,14 @@ export type SceneState = {
   selectedId: string | null;
   placement: ShopItem | null;
   selectedWallId: string | null;
+  selectedPartitionId?: string | null;
   selectedDoor: boolean;
   wallPlacement: WallItem | null;
   showGrid: boolean;
   showWalls: boolean;
   preview: boolean;
   editMode?: 'arrange' | 'build';
-  buildTool?: 'add' | 'erase' | 'walls';
+  buildTool?: 'add' | 'erase' | 'walls' | 'partition';
   showCity?: boolean;
   resizeMode?: boolean;
   nightMode?: boolean;
@@ -39,6 +41,7 @@ export type SceneCallbacks = {
   onCell: (x: number, z: number) => void;
   onHover: (cell: Cell | null) => void;
   onSelectWall: (id: string | null) => void;
+  onSelectPartition?: (id: string | null) => void;
   onSelectDoor: () => void;
   onWallPlace: (candidate: WallItem) => void;
   onWallHover: (candidate: WallItem | null) => void;
@@ -50,7 +53,8 @@ export type SceneCallbacks = {
 };
 
 type Gesture = {
-  kind: 'resize' | 'height' | 'item' | 'door' | 'paint' | 'wall-item' | 'object-resize';
+  kind: 'resize' | 'height' | 'item' | 'door' | 'paint' | 'wall-item' | 'object-resize' | 'partition';
+  partitionCandidate?: PartitionWall;
   pointerId: number;
   handle?: BuildHandleId;
   base: ShopDocument;
@@ -147,6 +151,8 @@ export class ShopScene {
   private interactionMessage: string | null = null;
   private grid: THREE.LineSegments | null = null;
   private selection: THREE.Group | null = null;
+  private partitionPreview: THREE.Group | null = null;
+  private partitionSelection: THREE.Box3Helper | null = null;
   private ghost: THREE.Group | null = null;
   private footprint: THREE.Group | null = null;
   private wallSelection: THREE.Group | null = null;
@@ -264,11 +270,11 @@ export class ShopScene {
     const stairOpenings = getStairOpenings(buildingDoc, activeLevel);
     let lightingContentChanged = exteriorChanged;
     this.lighting.setMode(next.nightMode ?? false, firstShop || this.reducedMotion.matches);
-    const nextRoomKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, this.windowKey(getWallItems(shop)), getWallHeight(shop), getEntrance(shop).position, getEntranceRotation(shop), getExterior(shop).awning, shop.floorColor, shop.wallColor, shop.name, activeLevel, stairOpenings]);
+    const nextRoomKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, this.windowKey(getWallItems(shop)), getWallHeight(shop), getEntrance(shop).position, getEntranceWall(shop), getEntranceRotation(shop), getExterior(shop).awning, shop.floorColor, shop.wallColor, shop.name, activeLevel, stairOpenings, getPartitions(shop), getInteriorDoors(shop)]);
     if (nextRoomKey !== this.roomKey) {
       const previousDoorAngle = this.builtRoom?.doorPivot.rotation.y;
       if (this.room) disposeGroup(this.room);
-      const built = buildRoom(shop, { slabDepth: activeLevel > 0 ? LEVEL_SLAB : undefined, floorOpenings: stairOpenings });
+      const built = buildRoom(shop, { slabDepth: activeLevel > 0 ? LEVEL_SLAB : undefined, floorOpenings: stairOpenings, hasEntrance: activeLevel === 0 });
       this.builtRoom = built;
       this.room = built.group;
       this.walls = built.walls;
@@ -301,7 +307,7 @@ export class ShopScene {
       this.cityKey = nextCityKey;
     }
     if (this.city) { this.city.visible = next.showCity ?? true; this.city.position.y = -floorY; }
-    const nextItemKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, getWallHeight(shop), next.showCity, next.showWalls, getEntrance(shop).position, getEntranceRotation(shop), shop.items]);
+    const nextItemKey = JSON.stringify([shop.width, shop.depth, shop.floorCells, getWallHeight(shop), next.showCity, next.showWalls, getEntrance(shop).position, getEntranceWall(shop), getEntranceRotation(shop), shop.items]);
     if (nextItemKey !== this.itemKey) {
       lightingContentChanged = true;
       while (this.items.children.length) disposeGroup(this.items.children[0]);
@@ -379,6 +385,7 @@ export class ShopScene {
     this.updateWallPlacement();
     this.updateHandles();
     this.updatePainter();
+    this.updatePartitionSelection();
     this.updateObjectResize();
     this.updatePreviewMetadata();
     if (lightingContentChanged) this.lighting.refreshSources([this.items, this.wallItems, this.city, this.building]);
@@ -554,7 +561,7 @@ export class ShopScene {
   private wallCandidateAt(event: PointerEvent, source: WallItem, fallback = false) {
     if (!this.state?.showWalls) return null;
     this.prepareRay(event);
-    const hit = intersectWall(this.raycaster.ray, this.state.shop, fallback ? source : undefined);
+    const hit = intersectWall(this.raycaster.ray, this.state.shop, fallback || source.wall === 'front' || source.wall === 'right' ? source : undefined);
     return hit ? { ...source, wall: hit.wall, line: hit.line, offset: hit.offset, height: hit.height } : null;
   }
 
@@ -667,6 +674,7 @@ export class ShopScene {
       entry.object.visible = (wallMode || entry.id === 'door') && (!shop.floorCells || ['walltop', 'door'].includes(entry.id)) && (!['left', 'back', 'walltop', 'door'].includes(entry.id) || this.state.showWalls);
       if (entry.id === 'door' && (this.state.activeLevel ?? 0) > 0) entry.object.visible = false;
       if (entry.id === 'door' && this.builtRoom) {
+        entry.axis = wallIsHorizontal(getEntranceWall(shop)) ? 'x' : 'z';
         const entrance = this.builtRoom.entrance;
         entrance.updateWorldMatrix(true, false);
         entry.object.position.copy(entrance.localToWorld(new THREE.Vector3(0, 1.1, 0.13)));
@@ -719,11 +727,8 @@ export class ShopScene {
   private resizeWallPoint(event: PointerEvent, item: WallItem) {
     if (!this.state) return null;
     this.prepareRay(event);
-    const horizontal = item.wall === 'back';
-    const coordinate = item.line - (horizontal ? this.state.shop.depth : this.state.shop.width) / 2;
-    const normal = horizontal ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
-    const point = this.raycaster.ray.intersectPlane(new THREE.Plane(normal, -coordinate), new THREE.Vector3());
-    return point ? { along: horizontal ? point.x + this.state.shop.width / 2 : point.z + this.state.shop.depth / 2, height: point.y } : null;
+    const point = intersectWallPlane(this.raycaster.ray, this.state.shop, item);
+    return point ? { along: point.offset, height: point.height } : null;
   }
 
   private resizeAt(event: PointerEvent) {
@@ -812,7 +817,7 @@ export class ShopScene {
 
   private updatePainter() {
     if (!this.state) return;
-    const active = this.state.editMode === 'build' && this.state.buildTool !== 'walls' && !this.state.preview && !this.state.placement && !this.state.wallPlacement;
+    const active = this.state.editMode === 'build' && ['add', 'erase'].includes(this.state.buildTool ?? 'add') && !this.state.preview && !this.state.placement && !this.state.wallPlacement;
     const draft = this.gesture?.draft ?? this.state.shop;
     this.painter.group.visible = active;
     this.painter.preview.visible = this.gesture?.kind === 'paint';
@@ -878,7 +883,7 @@ export class ShopScene {
     return nearest;
   }
 
-  private roomTarget(event: PointerEvent): 'left' | 'back' | 'door' | null {
+  private roomTarget(event: PointerEvent): WallSide | 'door' | null {
     if (!this.room || !this.state || getFloorCells(this.gesture?.draft ?? this.state.shop).length === 0) return null;
     this.prepareRay(event);
     const hits = this.raycaster.intersectObjects([...this.room.children, ...this.items.children], true);
@@ -888,7 +893,7 @@ export class ShopScene {
       while (ancestor) { if (!ancestor.visible) { visible = false; break; } ancestor = ancestor.parent; }
       if (!visible) continue;
       if (hit.object.userData.door && this.state?.showWalls) return 'door';
-      if (hit.object.userData.wall && this.state?.showWalls) return hit.object.userData.wall as 'left' | 'back';
+      if (hit.object.userData.wall && this.state?.showWalls) return hit.object.userData.wall as WallSide;
       // Furniture and the floor occlude targets behind them, like the visible scene.
       if (hit.object instanceof THREE.Mesh) return null;
     }
@@ -933,6 +938,7 @@ export class ShopScene {
       paintOperation: kind === 'paint' ? (this.state.buildTool === 'erase' ? 'erase' : 'add') : undefined,
       paintVisited: kind === 'paint' ? new Set<string>() : undefined,
       wallItem, wallCandidate: wallItem,
+      partitionCandidate: kind === 'partition' ? { id: `partition-${crypto.randomUUID()}`, axis: 'x', line: Math.round(point.z + base.depth / 2), start: Math.round(point.x + base.width / 2), end: Math.round(point.x + base.width / 2), color: base.wallColor } : undefined,
       wallGrab: wallItem && wallPoint ? { offset: wallItem.offset - wallPoint.offset, height: wallItem.height - wallPoint.height } : { offset: 0, height: 0 },
     };
     this.lockOrbit(true);
@@ -941,12 +947,13 @@ export class ShopScene {
     this.renderer.domElement.style.cursor = 'grabbing';
     this.updateSelection();
     this.updateWallSelection();
+    this.updatePartitionSelection();
     this.updateHandles();
     this.projectionDirty = true;
     if (kind === 'paint') {
       const cell = this.cellAt(event, true);
       if (cell) this.paintAt(cell);
-    } else this.setInteraction(kind === 'wall-item' ? 'Geser di dinding, atau pindahkan ke sisi lain. Lepas untuk menyimpan.' : kind === 'item' ? 'Geser barang ke petak yang kosong. Lepas untuk menaruhnya.' : kind === 'height' ? 'Tarik naik atau turun untuk mengubah tinggi dinding.' : kind === 'door' ? 'Geser pintu sepanjang sisi depan.' : 'Tarik batas ruangan. Barang di dalam tetap aman.');
+    } else this.setInteraction(kind === 'partition' ? 'Tarik mengikuti garis petak untuk menggambar tembok dalam.' : kind === 'wall-item' ? 'Geser di dinding, atau pindahkan ke sisi lain. Lepas untuk menyimpan.' : kind === 'item' ? 'Geser barang ke petak yang kosong. Lepas untuk menaruhnya.' : kind === 'height' ? 'Tarik naik atau turun untuk mengubah tinggi dinding.' : kind === 'door' ? 'Geser pintu sepanjang sisi yang dipilih.' : 'Tarik batas ruangan. Barang di dalam tetap aman.');
   }
 
   private applyRoomPreview(dimensions: Dimensions) {
@@ -1033,6 +1040,16 @@ export class ShopScene {
     if (!point) return;
     const dx = point.x - drag.startPoint.x;
     const dz = point.z - drag.startPoint.z;
+    if (drag.kind === 'partition' && drag.partitionCandidate) {
+      const start = { x: Math.round(drag.startPoint.x + drag.base.width / 2), z: Math.round(drag.startPoint.z + drag.base.depth / 2) };
+      const end = { x: Math.round(point.x + drag.base.width / 2), z: Math.round(point.z + drag.base.depth / 2) };
+      const axis = Math.abs(end.x - start.x) >= Math.abs(end.z - start.z) ? 'x' : 'z';
+      drag.partitionCandidate = { ...drag.partitionCandidate, axis, line: axis === 'x' ? start.z : start.x, start: Math.min(start[axis], end[axis]), end: Math.max(start[axis], end[axis]) };
+      drag.valid = canPlacePartition(drag.base, drag.partitionCandidate);
+      this.drawPartitionPreview(drag.partitionCandidate, drag.valid);
+      this.setInteraction(drag.valid ? 'Lepas untuk membangun tembok. Pintu bisa ditambahkan sesudahnya.' : 'Tembok perlu lantai di kedua sisi dan tidak boleh memotong perabot.');
+      return;
+    }
     if (drag.kind === 'item' && drag.item && drag.itemPosition) {
       const object = this.items.children.find((entry) => entry.userData.itemId === drag.item!.id);
       if (!object) return;
@@ -1065,7 +1082,9 @@ export class ShopScene {
       dimensions.wallHeight = THREE.MathUtils.clamp(drag.dimensions.wallHeight + delta, 2.3, 4.5);
       this.setInteraction(`Tinggi dinding ${dimensions.wallHeight.toFixed(1)} m. Lepas untuk menyimpan.`);
     } else if (drag.kind === 'door') {
-      dimensions.entrancePosition = THREE.MathUtils.clamp(drag.dimensions.entrancePosition + dx / Math.max(1, getFloorBounds(drag.base).width - 2.2), 0, 1);
+      const horizontal = wallIsHorizontal(getEntranceWall(drag.base));
+      const bounds = getFloorBounds(drag.base);
+      dimensions.entrancePosition = THREE.MathUtils.clamp(drag.dimensions.entrancePosition + (horizontal ? dx : dz) / Math.max(1, (horizontal ? bounds.width : bounds.depth) - 2.2), 0, 1);
       this.setInteraction('Geser pintu ke tempat yang kamu suka. Lepas untuk menyimpan.');
     } else {
       const minimum = minimumSize({ ...drag.base, items: drag.base.items.filter((item) => !isStandingSign(item.kind) || hasFloorCell(drag.base, item.x, item.z)) });
@@ -1107,6 +1126,9 @@ export class ShopScene {
     if (this.wallDragFrame) disposeGroup(this.wallDragFrame);
     this.wallDragFrame = null;
     this.wallDragValid = null;
+    if (this.partitionPreview) disposeGroup(this.partitionPreview);
+    this.partitionPreview = null;
+    delete this.renderer.domElement.dataset.previewPartition;
     this.transient = null;
     this.transientWallItems = null;
     delete this.renderer.domElement.dataset.previewItem;
@@ -1117,6 +1139,7 @@ export class ShopScene {
     this.updatePainter();
     this.updateSelection();
     this.updateWallSelection();
+    this.updatePartitionSelection();
     this.updateObjectResize();
     this.updatePreviewMetadata();
     this.projectionDirty = true;
@@ -1141,7 +1164,13 @@ export class ShopScene {
     }
     let next = drag.base;
     let label = '';
-    if (drag.kind === 'paint' && drag.draft) {
+    if (drag.kind === 'partition') {
+      if (drag.moved && drag.valid && drag.partitionCandidate) {
+        next = placePartition(drag.base, drag.partitionCandidate);
+        label = 'Tembok dalam ditambahkan';
+        if (next !== drag.base) this.callbacks.onSelectPartition?.(drag.partitionCandidate.id);
+      }
+    } else if (drag.kind === 'paint' && drag.draft) {
       next = drag.draft;
       label = drag.paintOperation === 'add' ? 'Lantai ditambahkan' : 'Lantai dihapus';
     } else if (drag.kind === 'wall-item' && drag.wallItem) {
@@ -1264,6 +1293,50 @@ export class ShopScene {
     return null;
   }
 
+  private pickPartitionAt(event: PointerEvent): string | null {
+    if (!this.state?.showWalls || !this.builtRoom) return null;
+    this.prepareRay(event);
+    const hits = this.raycaster.intersectObjects([this.builtRoom.partitions, this.items, this.wallItems, this.room!], true);
+    for (const hit of hits) {
+      let object: THREE.Object3D | null = hit.object;
+      let visible = true;
+      while (object) { if (!object.visible) { visible = false; break; } object = object.parent; }
+      if (!visible) continue;
+      if (typeof hit.object.userData.partitionId === 'string') return hit.object.userData.partitionId;
+      if (hit.object instanceof THREE.Mesh) return null;
+    }
+    return null;
+  }
+
+  private updatePartitionSelection() {
+    if (this.partitionSelection) disposeGroup(this.partitionSelection);
+    this.partitionSelection = null;
+    if (!this.state?.selectedPartitionId || !this.state.showWalls || this.state.preview || this.state.exteriorOnly || this.gesture) return;
+    const object = this.builtRoom?.partitions.getObjectByName(`partition:${this.state.selectedPartitionId}`);
+    if (!object) return;
+    this.partitionSelection = new THREE.Box3Helper(new THREE.Box3().setFromObject(object), new THREE.Color('#8456c5'));
+    const materials = Array.isArray(this.partitionSelection.material) ? this.partitionSelection.material : [this.partitionSelection.material];
+    materials.forEach(material => { material.depthTest = false; });
+    this.partitionSelection.renderOrder = 20;
+    this.partitionSelection.raycast = () => undefined;
+    this.scene.add(this.partitionSelection);
+  }
+
+  private drawPartitionPreview(wall: PartitionWall, valid: boolean) {
+    if (this.partitionPreview) disposeGroup(this.partitionPreview);
+    this.partitionPreview = new THREE.Group();
+    const position = getPartitionPosition(this.state!.shop, wall), height = getWallHeight(this.state!.shop);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.02, position.length), height, 0.13), new THREE.MeshBasicMaterial({ color: valid ? '#6a9674' : '#ca6871', transparent: true, opacity: 0.42, depthWrite: false }));
+    mesh.position.y = height / 2;
+    mesh.raycast = () => undefined;
+    this.partitionPreview.add(mesh);
+    this.partitionPreview.position.set(position.x, 0, position.z);
+    this.partitionPreview.rotation.y = position.rotation;
+    this.scene.add(this.partitionPreview);
+    this.renderer.domElement.dataset.previewPartition = JSON.stringify({ ...wall, valid });
+    this.renderDirty = true;
+  }
+
   private setHover(cell: Cell | null) {
     if (cell?.x === this.hover?.x && cell?.z === this.hover?.z) return;
     this.hover = cell;
@@ -1284,6 +1357,12 @@ export class ShopScene {
     this.suppressClick = false;
     this.pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId };
     if (this.state.placement || this.state.wallPlacement || this.state.preview) return;
+    if (this.state.editMode === 'build' && this.state.buildTool === 'partition') {
+      if (!this.pickPartitionAt(event)) this.beginGesture(event, 'partition');
+      return;
+    }
+    // A visible partition owns its click; do not begin dragging furniture behind it.
+    if (this.state.editMode !== 'build' && this.pickPartitionAt(event)) return;
     if (this.resizeSelection()) {
       // Hover outlines must not move the real grips away from their selected object.
       this.resizeHover = null;
@@ -1304,7 +1383,7 @@ export class ShopScene {
       return;
     }
     if (this.state.editMode === 'build') {
-      if (this.state.buildTool !== 'walls') {
+      if (['add', 'erase'].includes(this.state.buildTool ?? 'add')) {
         const cell = this.cellAt(event, true);
         const targets = new Set(workCells(this.state.shop).map((point) => `${point.x},${point.z}`));
         if (cell && targets.has(`${cell.x},${cell.z}`)) this.beginGesture(event, 'paint');
@@ -1345,7 +1424,7 @@ export class ShopScene {
       this.renderer.domElement.style.cursor = 'crosshair';
       return;
     }
-    const painting = this.state.editMode === 'build' && this.state.buildTool !== 'walls' && !this.state.placement;
+    const painting = this.state.editMode === 'build' && ['add', 'erase', 'partition'].includes(this.state.buildTool ?? 'add') && !this.state.placement;
     const cell = this.cellAt(event, painting);
     this.setHover(cell);
     const target = this.roomTarget(event);
@@ -1385,6 +1464,8 @@ export class ShopScene {
     } else if (this.roomTarget(event) === 'door') {
       if (!this.state.preview) this.callbacks.onSelectDoor();
     } else if (!this.state.preview) {
+      const partitionId = this.pickPartitionAt(event);
+      if (partitionId) { this.callbacks.onSelectPartition?.(partitionId); return; }
       const wallId = this.pickWallAt(event);
       if (wallId) this.callbacks.onSelectWall(wallId);
       else { this.callbacks.onSelectWall(null); this.callbacks.onSelect(this.pickAt(event)); }
@@ -1577,6 +1658,12 @@ export class ShopScene {
       sceneY: level.getWorldPosition(new THREE.Vector3()).y,
     })) : []);
     data.stairOpenings = JSON.stringify(getStairOpenings(this.state.building ?? this.state.shop, this.state.activeLevel ?? 0));
+    data.partitions = JSON.stringify(getPartitions(doc));
+    data.interiorDoors = JSON.stringify(getInteriorDoors(doc));
+    data.entranceWall = getEntranceWall(doc);
+    const vertices = new Map<string, Cell>();
+    floorCells.forEach(cell => { for (const dx of [0, 1]) for (const dz of [0, 1]) vertices.set(`${cell.x + dx},${cell.z + dz}`, { x: cell.x + dx, z: cell.z + dz }); });
+    data.partitionPoints = JSON.stringify([...vertices.values()].map(point => ({ ...point, ...this.project(new THREE.Vector3(point.x - dimensions.width / 2, 0.045, point.z - dimensions.depth / 2)) })));
     // Inspect the rendered objects in either view, so mode-switch checks can detect stale geometry.
     const pose = (object: THREE.Object3D) => ({
       position: object.getWorldPosition(new THREE.Vector3()).toArray(),
@@ -1631,7 +1718,7 @@ export class ShopScene {
     if (this.state.showWalls) getWallRuns(this.state.shop).forEach((run) => {
       for (let offset = run.start + 0.5; offset < run.end; offset += 0.5) {
         for (let height = 0.5; height < getWallHeight(this.state!.shop); height += 0.5) {
-          const point = run.wall === 'back' ? new THREE.Vector3(offset - this.state!.shop.width / 2, height, run.line - this.state!.shop.depth / 2) : new THREE.Vector3(run.line - this.state!.shop.width / 2, height, offset - this.state!.shop.depth / 2);
+          const point = wallIsHorizontal(run.wall) ? new THREE.Vector3(offset - this.state!.shop.width / 2, height, run.line - this.state!.shop.depth / 2) : new THREE.Vector3(run.line - this.state!.shop.width / 2, height, offset - this.state!.shop.depth / 2);
           wallTargets.push({ ...run, offset, height, ...this.project(point) });
         }
       }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getFloorCells, getItemFootprint, getItemPlacementBounds, getWallHeight, getWallItemSize, getWallRuns, isStandingSign, wallItemPosition, type ShopDocument, type ShopItem, type WallItem } from '../model';
+import { wallInwardNormal } from './interactionWalls';
 
 export type ResizeEdge = 'min-x' | 'max-x' | 'min-z' | 'max-z' | 'min-y' | 'max-y';
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -132,11 +133,12 @@ export class ObjectResizeTools {
     const size = getWallItemSize(item);
     const position = wallItemPosition(shop, item);
     const rotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), position.rotation);
-    // Increasing wall offset follows +world Z on the left wall even though the
-    // mounted mesh's local X axis points the other way after its quarter turn.
+    // Saved offsets always increase along world X/Z, even when the front or
+    // left mounting rotation reverses the mesh's local X axis.
+    const inwardOffset = wallInwardNormal(item.wall).multiplyScalar(0.15);
     const point = (x: number, y: number) => {
       const target = wallItemPosition(shop, { ...item, offset: item.offset + x, height: item.height + y });
-      return new THREE.Vector3(item.wall === 'left' ? 0.15 : 0, 0, item.wall === 'back' ? 0.15 : 0).add(new THREE.Vector3(target.x, target.y, target.z));
+      return new THREE.Vector3(target.x, target.y, target.z).add(inwardOffset);
     };
     this.border([point(-size.width / 2, -size.height / 2), point(size.width / 2, -size.height / 2), point(size.width / 2, size.height / 2), point(-size.width / 2, size.height / 2)], valid);
     const gripSize = getWallItemSize(handleItem);

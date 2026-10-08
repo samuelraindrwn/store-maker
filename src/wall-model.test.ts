@@ -24,17 +24,22 @@ describe('wall catalog and geometry coordinates', () => {
     for (const item of items) expect(canPlaceWallItem(createEmptyShop(), item)).toBe(true);
   });
 
-  it('merges actual north/west edges, including holes and negative cells', () => {
+  it('merges all four boundary sides, including courtyard edges and negative cells', () => {
     expect(getWallRuns(createEmptyShop())).toEqual([
       { wall: 'back', line: 0, start: 0, end: 7 }, { wall: 'left', line: 0, start: 0, end: 6 },
+      { wall: 'front', line: 6, start: 0, end: 7 }, { wall: 'right', line: 7, start: 0, end: 6 },
     ]);
     const hole = { ...square(), floorCells: square().floorCells!.filter(cell => !(cell.x === 1 && cell.z === 1)) };
     expect(getWallRuns(hole)).toEqual([
       { wall: 'back', line: 0, start: 0, end: 3 }, { wall: 'back', line: 2, start: 1, end: 2 },
       { wall: 'left', line: 0, start: 0, end: 3 }, { wall: 'left', line: 2, start: 1, end: 2 },
+      { wall: 'front', line: 1, start: 1, end: 2 }, { wall: 'front', line: 3, start: 0, end: 3 },
+      { wall: 'right', line: 1, start: 1, end: 2 }, { wall: 'right', line: 3, start: 0, end: 3 },
     ]);
     expect(getWallRuns({ ...createEmptyShop(), floorCells: [{ x: -2, z: -1 }, { x: -1, z: -1 }, { x: -2, z: 0 }] })).toEqual([
       { wall: 'back', line: -1, start: -2, end: 0 }, { wall: 'left', line: -2, start: -1, end: 1 },
+      { wall: 'front', line: 0, start: -1, end: 0 }, { wall: 'front', line: 1, start: -2, end: -1 },
+      { wall: 'right', line: -1, start: 0, end: 1 }, { wall: 'right', line: 0, start: -1, end: 0 },
     ]);
   });
 
@@ -108,7 +113,7 @@ describe('wall placement and immutable edits', () => {
     const item = accessory('window', { offset: 3 });
     expect(findWallPlacement(createEmptyShop(), item, { wall: 'left', line: 0 })?.wall).toBe('left');
     const placed = findWallPlacement(strip(), item, { wall: 'left', line: 0 })!;
-    expect(placed.wall).toBe('back');
+    expect(placed.wall).toBe('front');
     expect(canPlaceWallItem(strip(), placed)).toBe(true);
     expect(findWallPlacement({ ...createEmptyShop(), floorCells: [{ x: 0, z: 0 }] }, item)).toBeNull();
   });
@@ -179,11 +184,12 @@ describe('accessory preservation during room changes', () => {
 
   it('rejects only impossible floor cells and continues the rest of a stroke without deleting accessories', () => {
     const window = accessory('window', { offset: 1.5 });
-    const doc = placeWallItem(strip(), window);
+    const front = accessory('window', { wall: 'front', line: 1, offset: 1.5 });
+    const doc = placeWallItem(placeWallItem(strip(), window), front);
     const changed = paintFloor(doc, [{ x: 1, z: -1 }, { x: 3, z: 0 }], 'add');
     expect(hasFloorCell(changed, 1, -1)).toBe(false);
     expect(hasFloorCell(changed, 3, 0)).toBe(true);
-    expect(changed.wallItems).toEqual([window]);
+    expect(changed.wallItems).toEqual([window, front]);
     expect(paintFloor(doc, [{ x: 1, z: 0 }], 'erase')).toBe(doc);
     expectValidAttachments(changed);
   });
@@ -201,10 +207,10 @@ describe('accessory preservation during room changes', () => {
 
   it('rejects a lower wall if every existing accessory cannot be preserved', () => {
     let doc: ShopDocument = { ...createEmptyShop(), wallHeight: 4.5, floorCells: [{ x: 0, z: 0 }] };
-    for (const wall of ['back', 'left'] as const) for (const height of [0.6, 1.7, 2.8, 3.9]) {
-      doc = placeWallItem(doc, accessory('painting', { wall, offset: 0.5, height }));
+    for (const wall of ['back', 'left', 'front', 'right'] as const) for (const height of [0.6, 1.7, 2.8, 3.9]) {
+      doc = placeWallItem(doc, accessory('painting', { wall, line: wall === 'front' || wall === 'right' ? 1 : 0, offset: 0.5, height }));
     }
-    expect(doc.wallItems).toHaveLength(8);
+    expect(doc.wallItems).toHaveLength(16);
     expect(setWallHeight(doc, 2.3)).toBe(doc);
   });
 

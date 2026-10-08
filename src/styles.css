@@ -129,7 +129,7 @@
 .scene-toolbar{display:flex;flex-shrink:0;justify-content:center;align-items:center;flex-wrap:wrap;gap:5px 8px;width:100%;padding:0;pointer-events:none}
 .scene-toolbar>.edit-mode-switch,.scene-toolbar>.build-tool-switch,.scene-toolbar>.placement-banner{pointer-events:auto}
 .scene-toolbar .edit-mode-switch{flex-shrink:0;background:#fffdf9;border:1px solid #e3dce9;box-shadow:0 3px 12px #41325008;backdrop-filter:none;padding:4px}
-.scene-toolbar .build-tool-switch{padding:4px;background:#fffdf9;box-shadow:none;backdrop-filter:none}
+.scene-toolbar .build-tool-switch{padding:4px;background:#fffdf9;box-shadow:none;backdrop-filter:none;max-width:100%;flex-wrap:wrap;justify-content:center;white-space:normal}
 .scene-toolbar .gesture-hint{justify-content:center;flex-basis:100%;min-width:0;white-space:normal;text-align:center;line-height:1.5;border:0;background:none;padding:0 4px;backdrop-filter:none}
 .scene-toolbar .gesture-hint .tiny-spark{flex-shrink:0}
 .scene-toolbar .placement-banner{position:static;transform:none;width:max-content;max-width:100%;padding:8px 10px;box-shadow:none;backdrop-filter:none}
@@ -144,7 +144,8 @@
   .scene-workspace>.scene-panel{flex:none;height:520px;min-height:0}
   .scene-toolbar{gap:5px 8px}
   .scene-toolbar .edit-mode-switch button{min-height:36px;font-size:11px}
-  .scene-toolbar .build-tool-switch button{min-height:34px;font-size:10px;padding:8px}
+  .scene-toolbar .build-tool-switch{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:min(100%,360px)}
+  .scene-toolbar .build-tool-switch button{min-height:44px;font-size:11px;padding:8px;min-width:0}
   .scene-toolbar .gesture-hint{font-size:10px;padding:0 3px}
   .is-preview .scene-workspace>.scene-panel{min-height:620px}
 }
@@ -171,3 +172,10 @@
 @media(max-width:390px){.building-view-switch{flex-basis:100%}.floor-navigation{margin:0}.floor-navigation button{min-width:49px}.floor-count-field{flex:1;width:auto;padding:0;border:0;gap:7px}.floor-count-field>span{font-size:9px;max-width:36px}.floor-count-field select{padding:7px;min-width:75px;font-size:10px}}
 
 @media(max-width:760px){.exterior-layout .library-panel{order:2}.exterior-layout .inspector-panel{order:3}.exterior-layout .exterior-guide-art{display:none}.exterior-layout .exterior-guide h2{margin-top:14px}}
+
+.room-partition-entry{grid-column:1/-1;margin-top:21px;padding-top:19px;border-top:1px solid var(--line)}
+.room-partition-entry .field-label{margin-bottom:8px}
+.room-partition-entry .muted{margin:0 0 10px}
+.room-partition-entry .button{display:flex;justify-content:flex-start;gap:8px;min-height:44px}
+.room-partition-entry .button small{margin-left:auto;white-space:nowrap;font-size:9px;color:#8d7b9b}
+.room-partition-entry .button span{min-width:0;text-align:left}

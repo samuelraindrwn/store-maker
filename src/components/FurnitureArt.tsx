@@ -19,6 +19,33 @@ export default function FurnitureArt({ kind, color = '#bea78b' }: { kind: ItemKi
       <path d="m36 48 13-4 8 5-14 4zm20-5 13-3 7 4-13 4z" fill="#e1c69d" /><path d="m36 48 7 5 14-4v9l-14 4-7-5zm20-5 7 5 13-4v9l-13 4-7-5z" fill="#cba77d" />
       <path d="m42 31 6-2m14-2 5-1m-17 28 5-1m12-4 5-2" stroke="#f7ecd8" strokeWidth="3" />
     </>}
+    {kind === 'toilet' && <>
+      <path d="m34 46 18-6 14 12-6 21-15 3-9-10z" fill={color} />
+      <path d="m28 18 27-7 12 8v27l-27 7-12-9z" fill={color} />
+      <path d="m28 18 12 9 27-8m-27 8v26" fill="none" stroke="#d5d6c9" strokeWidth="1.8" />
+      <path d="m27 16 28-7 13 9-28 8z" fill="#fbf8ed" /><path d="m51 14 8-2 4 3-8 2z" fill="#9eafab" />
+      <path d="M35 43c5-6 25-7 34 1 12 10 8 20-6 23-15 4-28-4-28-15z" fill={color} />
+      <ellipse cx="53" cy="49" rx="23" ry="12" fill="#fffbed" /><ellipse cx="53" cy="49" rx="14" ry="7" fill="#afc9c2" />
+      <path d="M40 58c6 4 15 6 24 2" fill="none" stroke="#dde1d4" strokeWidth="2" strokeLinecap="round" />
+    </>}
+    {kind === 'washbasin' && <>
+      <path d="m34 14 34-8v29l-34 9z" fill="#c1a884" /><path d="m38 17 26-6v20l-26 7z" fill="#c3ddd8" />
+      <path d="m41 18 12-3-12 15" fill="none" stroke="#f6faf0" strokeWidth="2" opacity=".65" />
+      <path d="m25 42 36-10 18 12-37 12z" fill="#faf5e8" /><path d="m25 42 17 14v17L25 60z" fill="#859d8c" /><path d="m42 56 37-12v18L42 73z" fill={color} />
+      <path d="m59 51 1 16m-13-6 8-2m10-3 8-2" stroke="#dbe4d5" strokeWidth="1.5" />
+      <ellipse cx="52" cy="44" rx="14" ry="6" fill="#b6cfca" /><ellipse cx="53" cy="46" rx="2" ry="1" fill="#889f97" />
+      <path d="M59 38v-9l-8 2v5" fill="none" stroke="#98aaa3" strokeWidth="3" strokeLinecap="round" />
+      <path d="m31 63-1 6m16 2v5m27-15v6" stroke="#b59b79" strokeWidth="3" />
+    </>}
+    {kind === 'shower' && <>
+      <path d="m19 58 39-12 25 16-39 13z" fill="#f6f4e9" /><path d="m19 58 25 17 39-13v5L44 80 19 63z" fill="#d8e2d6" />
+      <path d="m22 15 35-10 1 43-36 11z" fill="#c2dfd7" opacity=".6" /><path d="m22 15 21 14v45L22 59z" fill="#c2dfd7" opacity=".4" />
+      <path d="M22 59V15L57 5v43M22 15l21 14v45" fill="none" stroke={color} strokeWidth="2.7" strokeLinejoin="round" />
+      <path d="M46 47V14l16 8" fill="none" stroke="#95a8a0" strokeWidth="2.7" strokeLinecap="round" />
+      <ellipse cx="63" cy="24" rx="9" ry="4" fill="#9eafa7" /><path d="m40 43 11 5" stroke="#91a69b" strokeWidth="3" strokeLinecap="round" />
+      <path d="m28 20 8 5-8 15m20-11 4-10" stroke="#f7fbef" strokeWidth="2" fill="none" opacity=".65" />
+      <path d="m55 60 6-2 4 3-6 2z" fill="#95a9a1" />
+    </>}
     {kind === 'bathroom' && <>
       <path d="m17 26 39-14 28 15v38L45 78 17 62z" fill="#d8e0d5" /><path d="m17 26 28 17v35L17 62z" fill={color} /><path d="m45 43 39-16v38L45 78z" fill="#e7eadf" />
       <path d="m21 49 22 13 38-14m-49 17 38-14m-37 2 23 14" fill="none" stroke="#c2cdbf" strokeWidth="1" />

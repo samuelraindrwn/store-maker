@@ -1,7 +1,29 @@
 import * as THREE from 'three';
-import { getWallHeight, getWallRuns, type ShopDocument, type WallItem } from '../model';
+import { getWallHeight, getWallRuns, wallIsHorizontal, type ShopDocument, type WallItem, type WallSide } from '../model';
 
 export type WallHit = Pick<WallItem, 'wall' | 'line' | 'offset' | 'height'> & { point: THREE.Vector3; distance: number };
+
+/** The side visible from inside the cutaway room. */
+export function wallInwardNormal(wall: WallSide): THREE.Vector3 {
+  switch (wall) {
+    case 'back': return new THREE.Vector3(0, 0, 1);
+    case 'left': return new THREE.Vector3(1, 0, 0);
+    case 'front': return new THREE.Vector3(0, 0, -1);
+    case 'right': return new THREE.Vector3(-1, 0, 0);
+  }
+}
+
+/** Unbounded mounting plane for a selected object, including backside resizing. */
+export function intersectWallPlane(ray: THREE.Ray, shop: ShopDocument, mount: Pick<WallItem, 'wall' | 'line'>): WallHit | null {
+  const horizontal = wallIsHorizontal(mount.wall), normal = wallInwardNormal(mount.wall);
+  if (Math.abs(ray.direction.dot(normal)) < 0.000001) return null;
+  const coordinate = mount.line - (horizontal ? shop.depth : shop.width) / 2;
+  const origin = horizontal ? new THREE.Vector3(0, 0, coordinate) : new THREE.Vector3(coordinate, 0, 0);
+  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, origin);
+  const point = ray.intersectPlane(plane, new THREE.Vector3());
+  return point ? { wall: mount.wall, line: mount.line, offset: horizontal ? point.x + shop.width / 2 : point.z + shop.depth / 2,
+    height: point.y, point, distance: point.distanceTo(ray.origin) } : null;
+}
 
 /** Mathematical faces keep window openings usable as placement/drag surfaces. */
 export function intersectWall(ray: THREE.Ray, shop: ShopDocument, fallback?: WallItem): WallHit | null {
@@ -9,22 +31,20 @@ export function intersectWall(ray: THREE.Ray, shop: ShopDocument, fallback?: Wal
   if (!runs.length) return null;
   const intersections: WallHit[] = [];
   for (const run of runs) {
-    const normal = run.wall === 'back' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
-    const coordinate = run.line - (run.wall === 'back' ? shop.depth : shop.width) / 2;
-    const point = ray.intersectPlane(new THREE.Plane(normal, -coordinate), new THREE.Vector3());
-    if (!point) continue;
-    const offset = run.wall === 'back' ? point.x + shop.width / 2 : point.z + shop.depth / 2;
-    if (offset < run.start - 0.001 || offset > run.end + 0.001 || point.y < 0 || point.y > getWallHeight(shop)) continue;
-    intersections.push({ wall: run.wall, line: run.line, offset, height: point.y, point, distance: point.distanceTo(ray.origin) });
+    const sourceWall = run.wall === fallback?.wall && run.line === fallback.line;
+    // Hidden front/right faces must not intercept an ordinary click aimed at
+    // the visible back/left wall. An explicitly selected source can be dragged
+    // from its outside face, preserving front/right editing from the same view.
+    if (!sourceWall && ray.direction.dot(wallInwardNormal(run.wall)) >= -0.000001) continue;
+    const hit = intersectWallPlane(ray, shop, run);
+    if (!hit || hit.offset < run.start - 0.001 || hit.offset > run.end + 0.001 || hit.height < 0 || hit.height > getWallHeight(shop)) continue;
+    intersections.push(hit);
   }
   intersections.sort((a, b) => a.distance - b.distance);
   if (intersections[0]) return intersections[0];
   if (!fallback) return null;
   // Outside the wall, keep the object under the cursor and show a rejected drop.
-  const normal = fallback.wall === 'back' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
-  const coordinate = fallback.line - (fallback.wall === 'back' ? shop.depth : shop.width) / 2;
-  const point = ray.intersectPlane(new THREE.Plane(normal, -coordinate), new THREE.Vector3());
-  return point ? { wall: fallback.wall, line: fallback.line, offset: fallback.wall === 'back' ? point.x + shop.width / 2 : point.z + shop.depth / 2, height: point.y, point, distance: point.distanceTo(ray.origin) } : null;
+  return intersectWallPlane(ray, shop, fallback);
 }
 
 export function wallFrame(width: number, height: number, color: string, filled = false) {

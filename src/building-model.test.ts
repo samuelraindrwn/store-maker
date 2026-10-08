@@ -10,7 +10,9 @@ describe('building floors and starter layout', () => {
   it('starts with a collision-free store, ground bathroom and connecting stairs, and upstairs storage', () => {
     const doc = createInitialShop()
     expect(getLevelCount(doc)).toBe(2)
-    expect(doc.items.filter(item => item.kind === 'bathroom')).toHaveLength(1)
+    for (const kind of ['toilet', 'washbasin', 'shower']) expect(doc.items.filter(item => item.kind === kind)).toHaveLength(1)
+    expect(doc.partitions).toHaveLength(2)
+    expect(doc.interiorDoors).toHaveLength(1)
     expect(doc.items.filter(item => item.kind === 'stairs')).toHaveLength(1)
     expect(getLevelDocument(doc, 1).items.filter(item => item.kind === 'warehouse-rack').length).toBeGreaterThanOrEqual(4)
     for (let index = 0; index < getLevelCount(doc); index++) {
@@ -55,7 +57,7 @@ describe('building floors and starter layout', () => {
   it('applies upper-floor furniture and contour edits without changing other floors or architecture', () => {
     const doc = setLevelCount(createInitialShop(), 3)
     const firstUpper = getLevelDocument(doc, 1)
-    const painted = paintFloor(firstUpper, [{ x: 7, z: 0 }], 'add')
+    const painted = paintFloor(firstUpper, [{ x: 10, z: 0 }], 'add')
     const nextFloor = updateItem(painted, firstUpper.items[0].id, { color: '#123456' })
     const next = replaceLevelDocument(doc, 1, nextFloor)
     expect(next.items).toBe(doc.items)
@@ -64,8 +66,8 @@ describe('building floors and starter layout', () => {
     expect(getRoof(next)).toEqual(getRoof(doc))
     expect(getExterior(next)).toEqual(getExterior(doc))
     expect(getLevelDocument(next, 1).items[0].color).toBe('#123456')
-    expect(getFloorCells(getLevelDocument(next, 1))).toContainEqual({ x: 7, z: 0 })
-    expect(getFloorCells(doc)).not.toContainEqual({ x: 7, z: 0 })
+    expect(getFloorCells(getLevelDocument(next, 1))).toContainEqual({ x: 10, z: 0 })
+    expect(getFloorCells(doc)).not.toContainEqual({ x: 10, z: 0 })
     expect(getLevelDocument(doc, 1).items[0].color).not.toBe('#123456')
     expect(parseShop(JSON.stringify(next))).toEqual(next)
   })

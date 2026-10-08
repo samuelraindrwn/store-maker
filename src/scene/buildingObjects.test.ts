@@ -43,8 +43,8 @@ describe('closed multi-floor exterior', () => {
         // The authored back/left walls stay in place; exterior mode closes the
         // two cutaway sides around the original ground-floor entrance.
         expect(named(floor, 'structural-wall-panel')).toHaveLength(2);
-        expect(floor.getObjectByName('exterior-wall:south')).toBeDefined();
-        expect(floor.getObjectByName('exterior-wall:east')).toBeDefined();
+        expect(floor.getObjectByName('room-front-wall')!.visible).toBe(true);
+        expect(floor.getObjectByName('room-right-wall')!.visible).toBe(true);
         const panels = [...named(floor, 'structural-wall-panel'), ...named(floor, 'exterior-wall-panel')];
         for (const [x, z, dx, dz] of [[0, -3.5, 0, 1], [-2.65, 3.5, 0, -1], [-4, 0, 1, 0], [4, 0, -1, 0]]) {
           const ray = new THREE.Raycaster(new THREE.Vector3(x, y + 1, z), new THREE.Vector3(dx, 0, dz));
@@ -168,7 +168,9 @@ describe('stairs, stockroom and bathroom geometry', () => {
     try {
       expect(named(group, 'stair-tread')).toHaveLength(14);
       const top = named(group, 'stair-tread').at(-1)!;
-      expect(top.position.y).toBeCloseTo(4.2625);
+      const treadBounds = new THREE.Box3().setFromObject(top);
+      expect(treadBounds.max.y).toBeGreaterThanOrEqual(4.24);
+      expect(treadBounds.max.y).toBeLessThan(4.27);
       applyItemSize(group, { ...item, width: 4, depth: 6 });
       expect(group.scale.toArray()).toEqual([2, 1, 2]);
       expect(group.userData.stairRise).toBe(4.24);

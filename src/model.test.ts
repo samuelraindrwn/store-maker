@@ -13,8 +13,8 @@ const item = (kind: ItemKind, x: number, z: number, patch: Partial<ShopItem> = {
 })
 
 describe('catalog and starter shops', () => {
-  it('provides twenty-five unique kinds with the expected footprints', () => {
-    expect(CATALOG.map(entry => entry.kind)).toEqual(['shelf', 'table', 'counter', 'rack', 'plant', 'rug', 'lamp', 'stool', 'chalkboard', 'poster-stand', 'direction-sign', 'glass-cabinet', 'display-plinth', 'pegboard', 'food-display', 'drinks-fridge', 'coffee-station', 'prep-counter', 'stove', 'sink', 'dining-table', 'service-cart', 'stairs', 'warehouse-rack', 'bathroom'])
+  it('provides twenty-eight unique kinds including independent bathroom fixtures', () => {
+    expect(CATALOG.map(entry => entry.kind)).toEqual(['shelf', 'table', 'counter', 'rack', 'plant', 'rug', 'lamp', 'stool', 'chalkboard', 'poster-stand', 'direction-sign', 'glass-cabinet', 'display-plinth', 'pegboard', 'food-display', 'drinks-fridge', 'coffee-station', 'prep-counter', 'stove', 'sink', 'dining-table', 'service-cart', 'stairs', 'warehouse-rack', 'bathroom', 'toilet', 'washbasin', 'shower'])
     expect(CATALOG.map(entry => [entry.kind, entry.width, entry.depth])).toEqual([
       ['shelf', 2, 1], ['table', 2, 2], ['counter', 2, 1], ['rack', 2, 1],
       ['plant', 1, 1], ['rug', 2, 2], ['lamp', 1, 1], ['stool', 1, 1],
@@ -23,6 +23,7 @@ describe('catalog and starter shops', () => {
       ['food-display', 2, 1], ['drinks-fridge', 1, 1], ['coffee-station', 2, 1],
       ['prep-counter', 2, 1], ['stove', 2, 1], ['sink', 2, 1], ['dining-table', 2, 2], ['service-cart', 1, 1],
       ['stairs', 2, 3], ['warehouse-rack', 2, 1], ['bathroom', 2, 2],
+      ['toilet', 1, 1], ['washbasin', 1, 1], ['shower', 1, 1],
     ])
   })
 
@@ -35,10 +36,10 @@ describe('catalog and starter shops', () => {
     }
   })
 
-  it('creates a valid furnished 7×6 shop and independent documents', () => {
+  it('creates a valid furnished 10×9 shop and independent documents', () => {
     const first = createInitialShop()
     const second = createInitialShop()
-    expect(first).toMatchObject({ version: 2, width: 7, depth: 6 })
+    expect(first).toMatchObject({ version: 2, width: 10, depth: 9 })
     expect(first.items.length).toBeGreaterThanOrEqual(8)
     expect(parseShop(first)).toEqual(first)
     expect(parseShop(createEmptyShop())).toEqual(createEmptyShop())
@@ -158,7 +159,7 @@ describe('immutable document changes', () => {
 
 describe('draggable architecture and old save compatibility', () => {
   it('reads old saves without inserting new fields or changing their layout', () => {
-    const old = createInitialShop()
+    const old = { ...createEmptyShop(), version: 1 as const, items: [item('shelf', 0, 0)] }
     const parsed = parseShop(JSON.stringify(old))!
     expect(parsed).toEqual(old)
     expect(getWallHeight(parsed)).toBe(2.75)
@@ -178,7 +179,7 @@ describe('draggable architecture and old save compatibility', () => {
   })
 
   it('keeps door opening and position independent and immutable', () => {
-    const old = createInitialShop()
+    const old = createEmptyShop()
     const moved = setEntrance(old, { position: 0.333333 })
     const opened = setEntrance(moved, { open: true })
     expect(opened.entrance).toEqual({ position: 0.333, open: true })
@@ -192,7 +193,7 @@ describe('draggable architecture and old save compatibility', () => {
   })
 
   it('round-trips architecture without losing it when resizing or editing furniture', () => {
-    const doc = setEntrance(setWallHeight(createInitialShop(), 3.8), { position: 0.8, open: true })
+    const doc = setEntrance(setWallHeight({ ...createEmptyShop(), items: [item('shelf', 0, 0, { id: 'bookshelf' })] }, 3.8), { position: 0.8, open: true })
     const next = resizeShop(doc, 9, 8)!
     expect(next).toMatchObject({ wallHeight: 3.8, entrance: { position: 0.8, open: true } })
     const parsed = parseShop(JSON.stringify(next))!
@@ -232,7 +233,7 @@ describe('draggable architecture and old save compatibility', () => {
   })
 
   it('preserves orientation while moving and opening, with immutable snapshots for undo', () => {
-    const original = createInitialShop()
+    const original = createEmptyShop()
     const rotated = setEntrance(original, { rotation: 270 })
     const moved = setEntrance(rotated, { position: 0.333333 })
     const opened = setEntrance(moved, { open: true })

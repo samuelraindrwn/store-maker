@@ -22,7 +22,7 @@ const allProducts: ProductKind[] = ['books', 'ceramics', 'plants', 'fashion', 'v
 
 describe('retail and food catalog', () => {
   it('adds eleven distinct kinds with the requested dimensions, names, and initial stock', () => {
-    expect(new Set(CATALOG.map(entry => entry.kind)).size).toBe(25)
+    expect(new Set(CATALOG.map(entry => entry.kind)).size).toBe(28)
     for (const [kind, name, width, depth, stockable, stock] of additions) {
       const entry = CATALOG.find(entry => entry.kind === kind)!
       expect(entry).toMatchObject({ kind, name, width, depth, stockable })
@@ -52,7 +52,8 @@ describe('retail and food catalog', () => {
       ['welcome-rug', 'rug', 'none'], ['bookshelf', 'shelf', 'books'], ['ceramic-shelf', 'shelf', 'ceramics'],
       ['warm-lamp', 'lamp', 'none'], ['fashion-rack', 'rack', 'fashion'], ['display-table', 'table', 'ceramics'],
       ['checkout', 'counter', 'none'], ['little-seat', 'stool', 'none'], ['green-corner', 'plant', 'none'],
-      ['front-plant', 'plant', 'none'], ['ground-stairs', 'stairs', 'none'], ['ground-bathroom', 'bathroom', 'none'],
+      ['front-plant', 'plant', 'none'], ['ground-stairs', 'stairs', 'none'],
+      ['ground-toilet', 'toilet', 'none'], ['ground-shower', 'shower', 'none'], ['ground-washbasin', 'washbasin', 'none'],
       ['sidewalk-chalkboard', 'chalkboard', 'none'],
     ])
     expect(parseShop(initial)).toEqual(initial)

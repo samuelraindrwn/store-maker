@@ -30,7 +30,9 @@ test('two-storey example keeps floor edits isolated and exports the entire build
   const errors = await open(page, info);
   const initial = createInitialShop();
   await expect.poll(() => saved(page)).toEqual(initial);
-  expect(initial.items.map(item => item.kind)).toEqual(expect.arrayContaining(['stairs', 'bathroom']));
+  expect(initial.items.map(item => item.kind)).toEqual(expect.arrayContaining(['stairs', 'toilet', 'washbasin', 'shower']));
+  expect(initial.partitions).toHaveLength(2);
+  expect(initial.interiorDoors).toHaveLength(1);
   expect(initial.upperFloors?.[0].items.some(item => item.kind === 'warehouse-rack')).toBe(true);
   await expect(page.getByLabel('Jumlah lantai', { exact: true })).toHaveValue('2');
   await photo(page, info, 'ground-bathroom-stairs');
@@ -140,28 +142,31 @@ test('legacy single-floor design is preserved and utility catalog places on the 
   await page.getByLabel('Jumlah lantai', { exact: true }).selectOption('2');
   await button(page, 'Edit lantai 2').click();
   await button(page, 'Gudang & utilitas').click();
-  expect(await page.locator('.catalog-card').count()).toBe(3);
-  for (const [kind, x, z] of [['warehouse-rack', 4, 1], ['bathroom', 6, 4], ['stairs', 1, 5]] as const) {
+  expect(await page.locator('.catalog-card').count()).toBe(5);
+  for (const [kind, x, z] of [['warehouse-rack', 4, 1], ['toilet', 6, 4], ['washbasin', 7, 4], ['shower', 8, 4], ['stairs', 1, 5]] as const) {
     await page.getByTestId(`catalog-${kind}`).click();
     await page.getByLabel('Petak X', { exact: true }).selectOption(String(x));
     await page.getByLabel('Petak Y', { exact: true }).selectOption(String(z));
     await button(page, 'Letakkan di sini').click();
   }
   const design = await saved(page);
-  expect(design.upperFloors![0].items.map(item => item.kind)).toEqual(expect.arrayContaining(['warehouse-rack', 'bathroom', 'stairs']));
-  expect(design.items.some(item => item.kind === 'bathroom')).toBe(false);
+  expect(design.upperFloors![0].items.map(item => item.kind)).toEqual(expect.arrayContaining(['warehouse-rack', 'toilet', 'washbasin', 'shower', 'stairs']));
+  expect(design.items.some(item => ['toilet', 'washbasin', 'shower'].includes(item.kind))).toBe(false);
   await noOverflow(page);
   expect(errors).toEqual([]);
 });
 
 test('legacy one-floor exterior reuses the canvas, repaints, and can refresh by reselecting the mode', async ({ page }, info) => {
   test.setTimeout(90_000);
-  const legacy = createInitialShop();
-  delete legacy.upperFloors;
-  delete legacy.roof;
-  delete legacy.exterior;
-  legacy.items = legacy.items.filter(item => item.kind !== 'stairs' && item.kind !== 'bathroom');
-  legacy.items.find(item => item.id === 'green-corner')!.z = 2;
+  // Keep a genuinely historical 7x6 layout independent of the evolving example.
+  const positions: Record<string, [number, number]> = {
+    'welcome-rug': [2, 3], bookshelf: [0, 0], 'ceramic-shelf': [2, 0], 'warm-lamp': [4, 0],
+    'fashion-rack': [5, 0], 'display-table': [3, 2], checkout: [0, 4], 'little-seat': [2, 4],
+    'green-corner': [0, 2], 'front-plant': [6, 5], 'sidewalk-chalkboard': [0, 6],
+  };
+  const legacy: ShopDocument = { ...createEmptyShop(), name: 'Sudut Cerita', items: createInitialShop().items
+    .filter(item => positions[item.id]).map(item => ({ ...item, x: positions[item.id][0], z: positions[item.id][1] })) };
+  delete legacy.wallItems;
   const errors = await open(page, info, legacy);
   const first = await canvas(page).elementHandle();
   const interior = await canvas(page).screenshot();

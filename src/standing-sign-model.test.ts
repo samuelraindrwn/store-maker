@@ -97,7 +97,7 @@ describe('one-time standing sign migration', () => {
     const migrated = upgradeShop(legacy())
     for (const doc of [initial, migrated]) {
       expect(doc.version).toBe(2)
-      expect(doc.items.filter(entry => isStandingSign(entry.kind))).toEqual([expect.objectContaining({ id: 'sidewalk-chalkboard', kind: 'chalkboard', x: 0, z: 6 })])
+      expect(doc.items.filter(entry => isStandingSign(entry.kind))).toEqual([expect.objectContaining({ id: 'sidewalk-chalkboard', kind: 'chalkboard', x: 0, z: doc.depth })])
       expectValid(doc)
     }
     expect(createEmptyShop().version).toBe(2)

@@ -81,7 +81,7 @@ describe('window style edits and preservation', () => {
     const wide = windowItem({ windowStyle: 'picture', width: 5, sizeHeight: 1.2, offset: 3 })
     const original = placeWallItem(createEmptyShop(), wide)
     const narrower = resizeShop(original, 4, 6)!
-    expect(narrower.wallItems![0]).toMatchObject({ id: wide.id, windowStyle: 'picture', wall: 'left', width: 5 })
+    expect(narrower.wallItems![0]).toMatchObject({ id: wide.id, windowStyle: 'picture', wall: 'right', width: 5 })
     expect(canPlaceWallItem(narrower, narrower.wallItems![0], wide.id)).toBe(true)
     const high = windowItem({ windowStyle: 'grid', height: 3.5 })
     const taller = placeWallItem({ ...createEmptyShop(), wallHeight: 4.5 }, high)

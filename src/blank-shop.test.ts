@@ -16,7 +16,7 @@ describe('completely blank shop documents', () => {
     expect(getWallItems(blank)).toEqual([])
     expect(getFloorCells(createEmptyShop())).toHaveLength(42)
     expect(createEmptyShop()).not.toHaveProperty('floorCells')
-    expect(createInitialShop().items).toHaveLength(13)
+    expect(createInitialShop().items).toHaveLength(15)
     expect(createInitialShop().wallItems).toHaveLength(2)
     const other = createBlankShop()
     expect(other.items).not.toBe(blank.items)
@@ -82,6 +82,7 @@ describe('building from an empty plot', () => {
     expect(getFloorBounds(first)).toEqual({ minX: -2, maxX: -2, minZ: -1, maxZ: -1, width: 1, depth: 1 })
     expect(getWallRuns(first)).toEqual([
       { wall: 'back', line: -1, start: -2, end: -1 }, { wall: 'left', line: -2, start: -1, end: 0 },
+      { wall: 'front', line: 0, start: -2, end: -1 }, { wall: 'right', line: -1, start: -1, end: 0 },
     ])
     const furnished = placeItem(first, { ...createItem('plant'), x: -2, z: -1 })
     expect(furnished.items).toHaveLength(1)

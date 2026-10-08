@@ -18,6 +18,7 @@ export type ShopCanvasProps = {
   selectedId: string | null;
   placement: ShopItem | null;
   selectedWallId: string | null;
+  selectedPartitionId?: string | null;
   selectedDoor: boolean;
   resizeMode?: boolean;
   wallPlacement: WallItem | null;
@@ -25,13 +26,14 @@ export type ShopCanvasProps = {
   showWalls: boolean;
   preview: boolean;
   editMode: 'arrange' | 'build';
-  buildTool: 'add' | 'erase' | 'walls';
+  buildTool: 'add' | 'erase' | 'walls' | 'partition';
   showCity: boolean;
   nightMode?: boolean;
   onSelect: (id: string | null) => void;
   onCell: (x: number, z: number) => void;
   onHover: (cell: Cell | null) => void;
   onSelectWall: (id: string | null) => void;
+  onSelectPartition?: (id: string | null) => void;
   onSelectDoor: () => void;
   onWallPlace: (candidate: WallItem) => void;
   onWallHover: (candidate: WallItem | null) => void;
@@ -70,6 +72,7 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
         onCell: (x, z) => latest.current.onCell(x, z),
         onHover: (cell) => latest.current.onHover(cell),
         onSelectWall: (id) => latest.current.onSelectWall(id),
+        onSelectPartition: (id) => latest.current.onSelectPartition?.(id),
         onSelectDoor: () => latest.current.onSelectDoor(),
         onWallPlace: (candidate) => latest.current.onWallPlace(candidate),
         onWallHover: (candidate) => latest.current.onWallHover(candidate),
@@ -139,7 +142,7 @@ const ShopCanvas = forwardRef<SceneHandle, ShopCanvasProps>(function ShopCanvas(
       }
     }); });
     return () => { cancelAnimationFrame(firstFrame); cancelAnimationFrame(secondFrame); };
-  }, [props.shop, props.building, props.activeLevel, props.exteriorOnly, props.revision, props.selectedId, props.placement, props.selectedWallId, props.selectedDoor, props.resizeMode, props.wallPlacement, props.showGrid, props.showWalls, props.preview, props.editMode, props.buildTool, props.showCity, props.nightMode]);
+  }, [props.shop, props.building, props.activeLevel, props.exteriorOnly, props.revision, props.selectedId, props.placement, props.selectedWallId, props.selectedPartitionId, props.selectedDoor, props.resizeMode, props.wallPlacement, props.showGrid, props.showWalls, props.preview, props.editMode, props.buildTool, props.showCity, props.nightMode]);
 
   return (
     <div className="shop-canvas" aria-busy={loading} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: '#e8e3ed' }}>

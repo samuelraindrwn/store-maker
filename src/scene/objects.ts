@@ -1,13 +1,15 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { CATALOG, getEntrance, getEntranceAnchor, getEntranceRotation, getExterior, getFloorCells, getItemSize, getWallHeight, getWallItems, getWallItemSize, getWallRuns, WALL_CATALOG } from '../model';
-import type { ProductKind, ShopDocument, ShopItem, WallItem } from '../model';
+import { CATALOG, getEntrance, getEntranceAnchor, getEntranceRotation, getEntranceWall, getExterior, getFloorCells, getItemSize, getWallHeight, getWallItems, getWallItemSize, getWallRuns, wallItemPosition, WALL_CATALOG } from '../model';
+import type { ProductKind, ShopDocument, ShopItem, WallItem, WallSide } from '../model';
 import { wallPanels } from './wallGeometry';
 import { buildWindowGeometry, buildWindowSpandrels } from './windowGeometry';
 import { buildStockProduct } from './stockObjects';
 import { buildCatalogItem } from './catalogObjects';
 import { buildBuildingFurniture } from './buildingFurniture';
 import { subtractFloorOpenings, type FloorOpening } from './stairGeometry';
+import { buildUtilityItem } from './utilityObjects';
+import { buildInteriorPartitions } from './partitionGeometry';
 export { buildCity } from './city';
 
 const CREAM = '#f5ead6';
@@ -179,6 +181,8 @@ export function applyWallItemSize(group: THREE.Object3D, item: WallItem): void {
 }
 
 export function buildItem(item: ShopItem, floorRise = 2.99): THREE.Group {
+  const utilityItem = buildUtilityItem(item);
+  if (utilityItem) return utilityItem;
   const buildingFurniture = buildBuildingFurniture(item, floorRise);
   if (buildingFurniture) return buildingFurniture;
   const catalogItem = buildCatalogItem(item, stockProduct);
@@ -548,50 +552,73 @@ function buildContourFloor(shop: ShopDocument, floor: THREE.Group, slabDepth = 0
   }
 }
 
-/** Structural walls contain real openings; movable frames live in the scene's accessory group. */
-function buildStructuralWalls(shop: ShopDocument, backWall: THREE.Group, leftWall: THREE.Group, height: number) {
+type BoundaryWallGroups = Record<WallSide, THREE.Group>;
+
+/** All four sides share their saved apertures; cutaway visibility is independent. */
+function buildStructuralWalls(shop: ShopDocument, groups: BoundaryWallGroups, height: number, hasEntrance = true) {
   const windows = getWallItems(shop).filter(item => item.kind === 'window');
+  const entrance = getEntranceAnchor(shop), entranceWall = getEntranceWall(shop);
   for (const run of getWallRuns(shop)) {
-    const group = run.wall === 'back' ? backWall : leftWall;
-    const horizontal = run.wall === 'back';
+    const group = groups[run.wall];
+    const horizontal = run.wall === 'back' || run.wall === 'front';
+    const inward = run.wall === 'back' || run.wall === 'left' ? 1 : -1;
     const center = (run.start + run.end) / 2;
     const length = run.end - run.start;
     const x = (horizontal ? center : run.line) - shop.width / 2;
     const z = (horizontal ? run.line : center) - shop.depth / 2;
-    const openings = windows.filter(item => item.wall === run.wall && item.line === run.line).map(item => {
+    const runWindows = windows.filter(item => item.wall === run.wall && item.line === run.line && item.offset >= run.start && item.offset < run.end);
+    const openings = runWindows.map(item => {
       const size = getWallItemSize(item);
       return {
         start: item.offset - size.width / 2 + 0.08, end: item.offset + size.width / 2 - 0.08,
         bottom: item.height - size.height / 2 + 0.08, top: item.height + size.height / 2 - 0.08,
       };
     });
+    const entranceAlong = horizontal ? entrance.x + shop.width / 2 : entrance.z + shop.depth / 2;
+    const entrancePlane = horizontal ? entrance.z : entrance.x;
+    const runPlane = horizontal ? z : x;
+    if (hasEntrance && run.wall === entranceWall && Math.abs(entrancePlane - (runPlane - inward * 0.09)) < 0.001
+      && entranceAlong >= run.start && entranceAlong <= run.end) {
+      const relativeAngle = THREE.MathUtils.degToRad(getEntrance(shop).rotation ?? 0);
+      const scale = Math.min(1, entrance.width / 1.84);
+      const halfWidth = (1.52 * scale * Math.abs(Math.cos(relativeAngle)) + 0.24 * Math.abs(Math.sin(relativeAngle))) / 2;
+      openings.push({ start: entranceAlong - halfWidth, end: entranceAlong + halfWidth, bottom: 0, top: 2.19 });
+      group.userData.entranceOpening = { x: entrance.x, z: entrance.z, width: halfWidth * 2 };
+    }
     for (const panel of wallPanels(run.start - 0.05, run.end + 0.05, height, openings)) {
       const span = panel.end - panel.start;
       const along = (panel.start + panel.end) / 2;
       const piece = box(group, horizontal ? span : 0.16, panel.top - panel.bottom, horizontal ? 0.16 : span,
-        shop.wallColor, horizontal ? along - shop.width / 2 : x - 0.07, (panel.bottom + panel.top) / 2,
-        horizontal ? z - 0.07 : along - shop.depth / 2, 0);
-      piece.name = 'structural-wall-panel'; piece.userData.wallLine = run.line;
+        shop.wallColor, horizontal ? along - shop.width / 2 : x - inward * 0.07, (panel.bottom + panel.top) / 2,
+        horizontal ? z - inward * 0.07 : along - shop.depth / 2, 0);
+      piece.name = run.wall === 'front' || run.wall === 'right' ? 'exterior-wall-panel' : 'structural-wall-panel'; piece.userData.wallLine = run.line;
       piece.userData.wallPanel = { bottom: panel.bottom, top: panel.top, ceiling: panel.top === height };
     }
-    for (const item of windows.filter(item => item.wall === run.wall && item.line === run.line && item.offset >= run.start && item.offset < run.end)) {
+    for (const item of runWindows) {
       for (const spandrel of buildWindowSpandrels(item, shop.wallColor)) {
+        const mount = wallItemPosition(shop, item);
+        spandrel.rotation.y = mount.rotation;
         if (horizontal) {
           spandrel.position.x = item.offset - shop.width / 2;
-          spandrel.position.z = run.line - shop.depth / 2 - 0.15;
+          spandrel.position.z = run.line - shop.depth / 2 - inward * 0.15;
         } else {
-          spandrel.rotation.y = Math.PI / 2;
-          spandrel.position.x = run.line - shop.width / 2 - 0.15;
+          spandrel.position.x = run.line - shop.width / 2 - inward * 0.15;
           spandrel.position.z = item.offset - shop.depth / 2;
         }
         group.add(spandrel);
       }
     }
-    box(group, horizontal ? length : 0.09, 0.12, horizontal ? 0.08 : length, '#c6b3a2', horizontal ? x : x + 0.05, 0.085, horizontal ? z + 0.05 : z, 0.012);
-    box(group, horizontal ? length + 0.12 : 0.23, 0.1, horizontal ? 0.23 : length + 0.12, CREAM, horizontal ? x : x - 0.07, height + 0.04, horizontal ? z - 0.07 : z, 0.02).userData.wallCoping = true;
+    for (const panel of wallPanels(run.start, run.end, 0.12, openings)) {
+      const span = panel.end - panel.start, along = (panel.start + panel.end) / 2;
+      box(group, horizontal ? span : 0.09, panel.top - panel.bottom, horizontal ? 0.08 : span, '#c6b3a2',
+        horizontal ? along - shop.width / 2 : x + inward * 0.05, (panel.top + panel.bottom) / 2 + 0.025,
+        horizontal ? z + inward * 0.05 : along - shop.depth / 2, 0.012).name = 'wall-plinth';
+    }
+    const coping = box(group, horizontal ? length + 0.12 : 0.23, 0.1, horizontal ? 0.23 : length + 0.12, CREAM,
+      horizontal ? x : x - inward * 0.07, height + 0.04, horizontal ? z - inward * 0.07 : z, 0.02);
+    coping.userData.wallCoping = true;
   }
-  backWall.traverse(object => { object.userData.wall = 'back'; object.userData.interaction = 'wall'; });
-  leftWall.traverse(object => { object.userData.wall = 'left'; object.userData.interaction = 'wall'; });
+  for (const [side, group] of Object.entries(groups)) group.traverse(object => { object.userData.wall = side; object.userData.interaction = 'wall'; });
 }
 
 /** Structural surfaces that can support a freestanding sign, excluding door/awning geometry. */
@@ -618,7 +645,12 @@ export function applyEntranceTransform(shop: ShopDocument, entrance: THREE.Objec
   entrance.rotation.y = -THREE.MathUtils.degToRad(getEntranceRotation(shop));
   entrance.scale.x = Math.min(1, anchor.width / 1.84);
   entrance.userData.centerX = anchor.x;
-  entrance.userData.centerRange = [getEntranceAnchor({ ...shop, entrance: { ...getEntrance(shop), position: 0 } }).x, getEntranceAnchor({ ...shop, entrance: { ...getEntrance(shop), position: 1 } }).x];
+  entrance.userData.centerZ = anchor.z;
+  const side = getEntranceWall(shop), horizontal = side === 'back' || side === 'front';
+  const start = getEntranceAnchor({ ...shop, entrance: { ...getEntrance(shop), position: 0 } });
+  const end = getEntranceAnchor({ ...shop, entrance: { ...getEntrance(shop), position: 1 } });
+  entrance.userData.centerAxis = horizontal ? 'x' : 'z';
+  entrance.userData.centerRange = [horizontal ? start.x : start.z, horizontal ? end.x : end.z];
 }
 
 /** One authored doorway, including its leaf, sign, landing, mat, and optional canopy. */
@@ -696,18 +728,24 @@ export function buildEntrance(shop: ShopDocument) {
   return { entrance, doorPivot, doorHit };
 }
 
-export function buildRoom(shop: ShopDocument, options: { slabDepth?: number; floorOpenings?: readonly FloorOpening[] } = {}) {
+export function buildRoom(shop: ShopDocument, options: { slabDepth?: number; floorOpenings?: readonly FloorOpening[]; enclosed?: boolean; hasEntrance?: boolean } = {}) {
   const group = new THREE.Group();
   group.name = 'shop-room';
   const walls = new THREE.Group();
   const floor = new THREE.Group();
   const backWall = new THREE.Group();
   const leftWall = new THREE.Group();
+  const frontWall = new THREE.Group();
+  const rightWall = new THREE.Group();
+  const boundaryWalls: BoundaryWallGroups = { back: backWall, left: leftWall, front: frontWall, right: rightWall };
+  const partitions = buildInteriorPartitions(shop);
   floor.name = 'room-floor';
   backWall.name = 'room-back-wall';
   leftWall.name = 'room-left-wall';
+  frontWall.name = 'room-front-wall'; rightWall.name = 'room-right-wall';
+  frontWall.visible = rightWall.visible = options.enclosed ?? false;
   group.add(floor, walls);
-  walls.add(backWall, leftWall);
+  walls.add(backWall, leftWall, frontWall, rightWall, partitions);
   const w = shop.width;
   const d = shop.depth;
   const h = getWallHeight(shop);
@@ -728,7 +766,7 @@ export function buildRoom(shop: ShopDocument, options: { slabDepth?: number; flo
     entrance.visible = false;
     const previewDimensions = (_width: number, _depth: number, _height: number, _entrancePosition?: number) => undefined;
     const previewWallItems = (_items: WallItem[]) => undefined;
-    return { group, walls, floor, backWall, leftWall, entrance, doorPivot, doorHit, previewDimensions, previewWallItems, hasFloor: false };
+    return { group, walls, floor, backWall, leftWall, frontWall, rightWall, partitions, entrance, doorPivot, doorHit, previewDimensions, previewWallItems, hasFloor: false };
   }
 
   if (customFloor || options.slabDepth !== undefined || options.floorOpenings?.length) {
@@ -744,9 +782,13 @@ export function buildRoom(shop: ShopDocument, options: { slabDepth?: number; flo
     box(floor, 0.985, 0.055, 0.985, `#${color.getHexString()}`, x - w / 2 + 0.5, -0.003, z - d / 2 + 0.5, 0.006);
   }
   }
-  buildStructuralWalls(shop, backWall, leftWall, h);
+  buildStructuralWalls(shop, boundaryWalls, h, options.hasEntrance ?? true);
 
   const { entrance, doorPivot, doorHit } = buildEntrance(shop);
+  if (options.hasEntrance === false) {
+    entrance.visible = false;
+    entrance.traverse(object => { object.raycast = () => undefined; });
+  }
   walls.add(entrance);
   floor.userData.interaction = 'floor';
 
@@ -755,7 +797,7 @@ export function buildRoom(shop: ShopDocument, options: { slabDepth?: number; flo
     previewHeight = height;
     // Openings remain at absolute mounting heights. Stretch only the solid
     // strips that reach the ceiling, without rebuilding geometry during a drag.
-    for (const wall of [backWall, leftWall]) for (const object of wall.children) {
+    for (const wall of Object.values(boundaryWalls)) for (const object of wall.children) {
       if (object.userData.wallCoping) object.position.y = height + 0.04;
       const panel = object.userData.wallPanel;
       if (!panel) continue;
@@ -764,16 +806,31 @@ export function buildRoom(shop: ShopDocument, options: { slabDepth?: number; flo
       object.scale.y = Math.max(0, top - panel.bottom) / (panel.top - panel.bottom);
       object.position.y = (panel.bottom + top) / 2;
     }
+    partitions.traverse(object => {
+      if (object.userData.partitionCoping) object.position.y = height + 0.015;
+      const panel = object.userData.wallPanel;
+      if (!panel) return;
+      const top = panel.ceiling ? height : Math.min(panel.top, height);
+      object.visible = top > panel.bottom;
+      object.scale.y = Math.max(0, top - panel.bottom) / (panel.top - panel.bottom);
+      object.position.y = (panel.bottom + top) / 2;
+    });
   };
 
-  const previewWallItems = (items: WallItem[]) => {
+  let previewShop = shop;
+  let previewItems = getWallItems(shop);
+  const rebuildBoundaryWalls = () => {
     // Preserve the groups referenced by the renderer, their transforms, and every
     // floor/entrance resource. Only structural wall geometry needs new openings.
     const previous = new THREE.Group();
-    previous.add(...backWall.children, ...leftWall.children);
+    previous.add(...Object.values(boundaryWalls).flatMap(wall => wall.children));
     disposeGroup(previous);
-    buildStructuralWalls({ ...shop, wallItems: items }, backWall, leftWall, h);
+    buildStructuralWalls({ ...previewShop, wallItems: previewItems }, boundaryWalls, h, options.hasEntrance ?? true);
     previewWallHeight(previewHeight);
+  };
+  const previewWallItems = (items: WallItem[]) => {
+    previewItems = items;
+    rebuildBoundaryWalls();
   };
 
   let previewFloorWidth = w, previewFloorDepth = d;
@@ -787,14 +844,15 @@ export function buildRoom(shop: ShopDocument, options: { slabDepth?: number; flo
       previewFloorWidth = width; previewFloorDepth = depth;
     }
     floor.scale.set(customFloor || fixedOpenings ? 1 : width / w, 1, customFloor || fixedOpenings ? 1 : depth / d);
-    backWall.scale.set(customFloor ? 1 : width / w, 1, 1);
-    backWall.position.set(0, 0, customFloor ? 0 : (d - depth) / 2);
-    leftWall.scale.set(1, 1, customFloor ? 1 : depth / d);
-    leftWall.position.set(customFloor ? 0 : (w - width) / 2, 0, 0);
+    const nextShop = { ...shop, width: customFloor ? w : width, depth: customFloor ? d : depth, entrance: { ...getEntrance(shop), position: entrancePosition } };
+    if (nextShop.width !== previewShop.width || nextShop.depth !== previewShop.depth || entrancePosition !== getEntrance(previewShop).position) {
+      previewShop = nextShop;
+      rebuildBoundaryWalls();
+      partitions.position.set((w - nextShop.width) / 2, 0, (d - nextShop.depth) / 2);
+    }
     previewWallHeight(height);
-    const previewShop = { ...shop, width: customFloor ? w : width, depth: customFloor ? d : depth, entrance: { ...getEntrance(shop), position: entrancePosition } };
     applyEntranceTransform(previewShop, entrance);
   };
   previewDimensions(w, d, h);
-  return { group, walls, floor, backWall, leftWall, entrance, doorPivot, doorHit, previewDimensions, previewWallItems, hasFloor: true };
+  return { group, walls, floor, backWall, leftWall, frontWall, rightWall, partitions, entrance, doorPivot, doorHit, previewDimensions, previewWallItems, hasFloor: true };
 }

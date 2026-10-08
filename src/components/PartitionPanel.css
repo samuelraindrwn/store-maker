@@ -1,0 +1,24 @@
+.partition-panel h2 { font-size: 25px; margin: 10px 0; }
+.partition-actions { display: flex; gap: 8px; margin: 15px 0; flex-wrap: wrap; }
+.partition-actions .button { padding: 10px 12px; font-size: 11px; min-height: 40px; gap: 7px; }
+.partition-list { display: grid; gap: 7px; margin: 18px 0; }
+.partition-list button { background: #fbf8fd; border: 1px solid #e7def0; border-radius: 10px; padding: 12px; display: flex; justify-content: space-between; gap: 10px; text-align: left; color: #776484; }
+.partition-list button.active { border-color: #9873cf; background: #f0e8fa; }
+.partition-list button span { font-size: 10px; }
+.partition-field { display: grid; gap: 6px; margin-bottom: 14px; min-width: 0; }
+.partition-field input, .partition-field select { min-width: 0; width: 100%; border: 1px solid #e5dded; border-radius: 9px; background: #fffdfb; color: #61516e; padding: 10px; font: inherit; font-size: 12px; }
+.partition-numbers { display: flex; gap: 8px; }
+.partition-numbers > label { flex: 1; }
+.partition-door { border-top: 1px solid #ece5ef; padding-top: 15px; margin-top: 15px; }
+.partition-door > strong { display: block; font-size: 13px; color: #746081; margin-bottom: 12px; }
+.partition-panel { min-width: 0; }
+.partition-panel .color-picker button[aria-pressed="true"] { box-shadow: 0 0 0 2px #8461c4; }
+.partition-list button strong { flex-shrink: 0; }
+.partition-list button span { text-align: right; }
+@media (max-width: 760px) {
+  .partition-actions .button { min-height: 44px; font-size: 12px; }
+  .partition-field input, .partition-field select { min-height: 44px; font-size: 14px; }
+  .partition-list button { min-height: 48px; }
+  .partition-list button span { font-size: 11px; }
+  .partition-panel .color-picker button { width: 34px; height: 34px; }
+}
