@@ -136,9 +136,6 @@
 .scene-toolbar .placement-banner>div{flex:1;min-width:0}
 .scene-toolbar .placement-banner .icon-button{flex-shrink:0}
 .is-preview .scene-workspace>.scene-panel{min-height:650px}
-@media(min-width:1400px){
-  .scene-toolbar{position:absolute;left:0;bottom:calc(100% + 12px);z-index:5}
-}
 @media(max-width:760px){
   .scene-workspace{order:1;gap:10px;min-height:0}
   .scene-workspace>.scene-panel{flex:none;height:520px;min-height:0}
